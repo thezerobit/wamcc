@@ -1,0 +1,1335 @@
+/****************************************************************************
+Prolog to Wam Compiler                     INRIA Rocquencourt - ChLoE Project
+Version 2.1                                                Daniel Diaz - 1994
+
+file : read.usr
+****************************************************************************/
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <setjmp.h>
+#include <stdarg.h>
+
+int   fscanf();
+FILE *fopen();
+int   fgetc();
+int   printf();
+int   vprintf();
+int   fscanf();
+int   sscanf();
+long  strtol();
+int   ungetc();
+
+
+
+
+/*---------------------------------*/
+/* Constants                       */
+/*---------------------------------*/
+
+#define NULL_WORD                  Tag_Value(-1,-1)
+
+
+#define MAX_NAME_LG                 256
+#define MAX_VAR_IN_TERM            1024
+
+#define THROW                      X7468726F77
+
+
+
+
+/*---------------------------------*/
+/* Type Definitions                */
+/*---------------------------------*/
+
+typedef enum
+    {
+     VARIABLE,
+     NATURAL_NUMBER,
+     UNSIGNED_FLOAT,
+     NAME,
+     STRING,
+     BACK_QUOTED,
+     PONCTUATION,
+     FULL_STOP,
+     END_OF_FILE
+    } TypTok;
+
+
+
+
+typedef struct
+    {
+     TypTok type;
+     char   name[MAX_NAME_LG];    /* type=VARIABLE NAME STRING BACK_QUOTED */
+     char   ponct;                /* type=PONCTUATION                      */
+     int    int_num;              /* type=NATURAL_NUMBER                   */
+     double float_num;            /* type=UNSIGNED_FLOAT                   */
+    }InfTok;
+
+
+
+typedef struct
+    {
+     char     name[MAX_NAME_LG];
+     AtomInf *atom;
+     WamWord  word;
+     Bool     named;
+     int      nb_of_uses;
+    }InfVar;
+
+
+
+
+/*---------------------------------*/
+/* Global Variables                */
+/*---------------------------------*/
+
+static char     c,c_look;
+static int      c_type;
+static InfTok   token;
+
+static InfVar   dico_var[MAX_VAR_IN_TERM];
+static int      nb_var;
+
+static Bool     disp_error;
+static jmp_buf  jumper;
+
+static AtomInf *syntax_error;
+
+static AtomInf *atom_syntax_error;
+
+static AtomInf *atom_dec10;
+static AtomInf *atom_error;
+static AtomInf *atom_fail;
+static AtomInf *atom_quiet;
+
+static AtomInf *atom_eof;
+static AtomInf *atom_equal;
+
+
+
+
+static WamWord buff_save_machine_regs[NB_OF_USED_MACHINE_REGS];
+
+
+
+
+/*---------------------------------*/
+/* Function Prototypes             */
+/*---------------------------------*/
+
+static
+Bool      Read_Term_With_Opts   (FILE *in);
+
+WamWord   Read_Term             (FILE *in);
+
+static
+WamWord   Read_Prolog_Term      (FILE *in);
+
+static
+void      Scan_Token            (FILE *in,Bool comma_as_op);
+
+static
+void      Scan_Number           (FILE *in);
+
+static
+void      Scan_Quoted           (FILE *in);
+
+static
+WamWord   Parse_Term            (FILE *in,int cur_prec,Bool comma_as_op);
+
+static
+WamWord   Parse_Args_Of_Functor (FILE *in,Bool comma_as_op,AtomInf *atom,
+                                 Bool bracket);
+
+static
+WamWord   Parse_Bracketed_Term  (FILE *in,Bool comma_as_op,Bool *bracket);
+
+static
+WamWord   Parse_List            (FILE *in);
+
+static
+WamWord   Compound_Term         (AtomInf *atom,int n);
+
+static
+int       Lookup_In_Dico_Var    (char *name);
+
+static
+void      Syntax_Error          (FILE *in,char *format,...);
+
+static
+void      Display_Token         (void);
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* read_line(X): reads a line (from input)                       */
+          /*                                                               */
+          /* A(0) will be unified with an atom                             */
+          /*---------------------------------------------------------------*/
+
+#define Read_Line_1                                                         \
+    {                                                                       \
+     char     str[256];                                                     \
+     AtomInf *atom;                                                         \
+                                                                            \
+     Lib3(fgets,str,sizeof(str),input);                                     \
+     if (feof(input))                                                       \
+        {                                                                   \
+         clearerr(stdin);                                                   \
+         fail                                                               \
+        }                                                                   \
+                                                                            \
+     str[Lib1(strlen,str)-1]='\0';                   /* suppress last \n */ \
+     atom=Create_Allocate_Atom(str);                                        \
+     get_constant(atom,0)                                                   \
+    }
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* read_word(X): reads a word (from input)                       */
+          /*                                                               */
+          /* A(0) will be unified with an atom                             */
+          /*---------------------------------------------------------------*/
+
+#define Read_Word_1                                                         \
+    {                                                                       \
+     char     str[256];                                                     \
+     AtomInf *atom;                                                         \
+                                                                            \
+     Lib3(fscanf,input,"%s",str);                                           \
+     if (feof(input))                                                       \
+        {                                                                   \
+         clearerr(stdin);                                                   \
+         fail                                                               \
+        }                                                                   \
+                                                                            \
+     atom=Create_Allocate_Atom(str);                                        \
+     get_constant(atom,0)                                                   \
+    }
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* read_integer(X): reads an integer (from input)                */
+          /*                                                               */
+          /* A(0) will be unified with an INT                              */
+          /*---------------------------------------------------------------*/
+
+#define Read_Integer_1                                                      \
+     Lib3(fscanf,input,"%d",&word);                                         \
+     if (feof(input))                                                       \
+        {                                                                   \
+         clearerr(stdin);                                                   \
+         fail                                                               \
+        }                                                                   \
+                                                                            \
+     get_integer(word,0)
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* read(X): reads a term (from input)                            */
+          /*                                                               */
+          /* A(0) will be unified with a term                              */
+          /*---------------------------------------------------------------*/
+
+#define Read_1                                                              \
+     syntax_error=atom_dec10;                                               \
+     A(1)=Read_Term(input);                                                 \
+     get_x_value(0,1)
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* read_term(X,Vars,VarNames,SinglNames): reads a term           */
+          /* (from input)                                                  */
+          /*                                                               */
+          /* A(0) will be unified with a term                              */
+          /* A(1) will be unified with a list of variables of the term     */
+          /* A(2) will be unified with a list of A=V variables of the term */
+          /* A(3) will be unified with a list of A=V singleton variables   */
+          /* A(4) is a CST (dec10/error/fail/quiet)                        */
+          /* A(1)/A(2)/A(3) will not be unified if equal to []             */
+          /*---------------------------------------------------------------*/
+
+#define Read_Term_5                                                         \
+     if (!Read_Term_With_Opts(input))                                       \
+         fail
+
+
+
+
+/* Above this line, put your first macros (these included by pragma_c) */
+
+#undef  fail
+#define fail Fail_Like_Bool
+
+/* Below this line, put your others macros and your functions */
+
+
+#define   Read_Next_Char(in)   (c_type=((c=Lib1(fgetc,in))==EOF)            \
+                                        ? EOF : char_type[c])
+
+
+
+#define   Look_At_Next_Char(in)((Lib2(ungetc,c_look=Lib1(fgetc,in),in)==EOF)\
+                                        ? EOF : char_type[c_look])
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* READ_TERM_OPTS                                                          */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool Read_Term_With_Opts(FILE *in)
+
+{
+ Prototype(Prefix(Pred_Name(THROW,1)))
+ Decl_Wam_Engine_Vars
+ int last_named_var= -1;
+ int last_singleton_var= -1;
+ int i;
+
+
+ Deref(A(4),word,tag,adr)
+ syntax_error=UnTag_CST(word);
+
+ A(5)=Read_Term(in);
+
+ if (A(5)==NULL_WORD)
+     if (syntax_error==atom_error)
+        {
+         put_constant(atom_syntax_error,0)
+         Execute_A_Continuation((CodePtr) Prefix(Pred_Name(THROW,1)));
+        }
+      else
+         return FALSE;
+
+ get_x_value(0,5)
+
+ for(i=0;i<nb_var;i++)
+    {
+     dico_var[i].atom=Create_Allocate_Atom(dico_var[i].name);
+     if (dico_var[i].named)
+        {
+         last_named_var=i;
+
+         if (dico_var[i].nb_of_uses==1)
+             last_singleton_var=i;
+         }
+    }
+
+ Deref(A(1),word,tag,adr)
+ if (tag==REF)
+     if (nb_var==0)
+         get_nil(1)
+      else
+        {
+         for(i=0;i<nb_var-1;i++)
+            {
+             A(0)=dico_var[i].word;
+             get_list(1)
+             unify_x_value(0)
+             unify_x_variable(1)
+            }
+
+         A(0)=dico_var[i].word;
+         get_list(1)
+         unify_x_value(0)
+         unify_nil
+        }
+
+
+ Deref(A(2),word,tag,adr)
+ if (tag==REF)
+     if (last_named_var<0)
+         get_nil(2)
+      else
+        {
+         for(i=0;i<last_named_var;i++)
+             if (dico_var[i].named)
+                {
+                 A(0)=dico_var[i].word;
+                 put_structure(atom_equal,2,1)
+                 unify_constant(dico_var[i].atom)
+                 unify_x_value(0)
+
+                 get_list(2)
+                 unify_x_value(1)
+                 unify_x_variable(2)
+                }
+
+         A(0)=dico_var[i].word;
+         put_structure(atom_equal,2,1)
+         unify_constant(dico_var[i].atom)
+         unify_x_value(0)
+
+         get_list(2)
+         unify_x_value(1)
+         unify_nil
+        }
+
+
+ Deref(A(3),word,tag,adr)
+ if (tag==REF)
+     if (last_singleton_var<0)
+         get_nil(3)
+      else
+        {
+         for(i=0;i<last_singleton_var;i++)
+             if (dico_var[i].named && dico_var[i].nb_of_uses==1)
+                {
+                 A(0)=dico_var[i].word;
+                 put_structure(atom_equal,2,1)
+                 unify_constant(dico_var[i].atom)
+                 unify_x_value(0)
+
+                 get_list(3)
+                 unify_x_value(1)
+                 unify_x_variable(3)
+                }
+
+         A(0)=dico_var[i].word;
+         put_structure(atom_equal,2,1)
+         unify_constant(dico_var[i].atom)
+         unify_x_value(0)
+
+         get_list(3)
+         unify_x_value(1)
+         unify_nil
+        }
+
+ return TRUE;
+
+lab_fail:
+ return FALSE;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* READ_TERM                                                               */
+/*                                                                         */
+/* This function returns a Prolog term as a tagged word. If an error is    */
+/* encountered, it is reported if error_report and the execution fails     */
+/* if error_fail or the next term is read                                  */
+/*-------------------------------------------------------------------------*/
+WamWord Read_Term(FILE *in)
+
+{
+ WamWord term;
+
+ term=Read_Prolog_Term(in);
+
+ while(term==NULL_WORD && syntax_error==atom_dec10)
+     term=Read_Prolog_Term(in);
+
+ clearerr(stdin);
+
+ return term;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* READ_PROLOG_TERM                                                        */
+/*                                                                         */
+/* This function returns a Prolog term as a tagged word or NULL_WORD on    */
+/* error.                                                                  */
+/* The Scanner and the parser follows the ISO/IEC JTC1 SC22 WG17 report    */
+/* about the Prolog normalization.                                         */
+/* NB: the scanner recognizes floats but they are not supported by the WAM.*/
+/* To extend to floats only modify the corresponding case in Parse_Term.   */
+/*-------------------------------------------------------------------------*/
+static WamWord Read_Prolog_Term(FILE *in)
+
+{
+ int      jmp_val;
+ WamWord  term;
+ WamWord *save_reg_bank=reg_bank;
+ WamWord  local_reg_bank[REG_BANK_SIZE];
+
+ Switch_Reg_Bank(local_reg_bank);
+
+ nb_var=0;
+
+ disp_error=TRUE;
+
+ Save_Machine_Regs(buff_save_machine_regs)
+
+ jmp_val=setjmp(jumper);
+
+ Restore_Machine_Regs(buff_save_machine_regs)
+
+ if (jmp_val==0)
+    {
+     Read_Next_Char(in);
+     Scan_Token(in,TRUE);
+     term=Parse_Term(in,MAX_PREC,TRUE);
+
+     if (term==NULL_WORD)
+         if (token.type==END_OF_FILE)
+            {
+             put_constant(atom_eof,0)
+             term=A(0);
+            }
+          else
+             Syntax_Error(in,"cannot start an expression");
+      else
+         if (token.type!=FULL_STOP)
+             Syntax_Error(in,"operator or . expected after expression");
+    }
+  else                                           /* Syntax Error (Restore) */
+    {
+     Restore_Machine_Regs(buff_save_machine_regs)
+     term=NULL_WORD;
+    }
+
+ Switch_Reg_Bank(save_reg_bank);
+
+ return term;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* SCAN_TOKEN                                                              */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Scan_Token(FILE *in,Bool comma_as_op)
+
+{
+ char  c1;
+ char *s;
+
+ while(c_type==LA)                                     /* layout character */
+     Read_Next_Char(in);
+
+
+ switch(c_type)
+    {
+     case EOF:
+         token.type=END_OF_FILE;
+         break;
+
+     case SL:                                              /* small letter */
+     case UL:                                                 /* underline */
+     case CL:                                            /* capital letter */
+         token.type=(c_type==SL) ? NAME : VARIABLE;
+         s=token.name;
+         do
+            {
+             *s++ =c;
+             Read_Next_Char(in);
+            }
+         while(c_type & (UL | CL | SL | DI));
+         *s='\0';
+         break;
+
+     case DI:                                                     /* digit */
+         Scan_Number(in);
+         break;
+
+     case QT:                                                     /* quote */
+     case DQ:                                              /* double quote */
+     case BQ:                                                /* back quote */
+         Scan_Quoted(in);
+         break;
+
+     case SY:                                                    /* symbol */
+         c1=c;
+         Read_Next_Char(in);
+         if (c1=='.' && (c_type<=LA))            /* <= to also capture EOF */
+            {
+             token.type=FULL_STOP;
+             break;
+            }
+
+         if (c1=='/' && c=='*')                                 /* comment */
+            {
+             Read_Next_Char(in);
+             do
+                {
+                 c1=c;
+                 Read_Next_Char(in);
+                }
+             while(c_type!=EOF && (c1!='*' || c!='/'));
+
+             if (c_type==EOF)
+                {
+                 token.type=END_OF_FILE;
+                 Syntax_Error(in,"EOF in comment /* ... */");
+                }
+
+             Read_Next_Char(in);
+             Scan_Token(in,comma_as_op);
+             break;
+            }
+
+
+         token.type=NAME;
+         s=token.name;
+         *s++ =c1;
+         while(c_type==SY)
+            {
+             *s++ =c;
+             Read_Next_Char(in);
+            }
+         *s='\0';
+         break;
+
+     case CM:                                         /* comment character */
+         do
+             Read_Next_Char(in);
+         while(c!='\n' && c_type!=EOF);
+
+         if (c_type==EOF)
+            {
+             token.type=END_OF_FILE;
+             Syntax_Error(in,"EOF in comment : ... \\n");
+            }
+
+         Read_Next_Char(in);
+         Scan_Token(in,comma_as_op);
+         break;
+
+     case PC:                                     /* ponctuation character */
+         if (c==',' && comma_as_op)
+            {
+             token.type=NAME;
+             token.name[0]=c;
+             token.name[1]='\0';
+             Read_Next_Char(in);
+             break;
+            }
+
+         token.type=PONCTUATION;
+         token.ponct=c;
+         Read_Next_Char(in);
+         break;
+
+     case SC:                                            /* solo character */
+         token.type=NAME;
+         token.name[0]=c;
+         token.name[1]='\0';
+         Read_Next_Char(in);
+         break;
+
+     default:                                         /* unknown character */
+         token.name[0]=c;
+         token.name[1]='\0';
+         Read_Next_Char(in);
+         Syntax_Error(in,"unkown characted <%c>",token.name[0]);
+    }
+}
+
+
+
+/*-------------------------------------------------------------------------*/
+/* SCAN_NUMBER                                                             */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Scan_Number(FILE *in)
+
+{
+ int   lg,lg1;
+ int   base;
+ char *p;
+
+ p=token.name;
+ do
+    {
+     *p++=c;
+     Read_Next_Char(in);
+    }
+ while(c_type==DI);
+ lg=p-token.name;
+
+ if (c!='.' || Look_At_Next_Char(in)!=DI)
+    {                                                    /* integer number */
+     token.type=NATURAL_NUMBER;
+     *p++='\0';
+     Lib3(sscanf,token.name,"%d",&token.int_num);
+     if (lg!=1 || token.int_num!=0 || Lib2(strchr,"'bBoOxX",c)==NULL)
+         return;
+
+     if (c=='\'')
+        {
+         Read_Next_Char(in);
+         token.int_num=c;
+         Read_Next_Char(in);
+         return;
+        }
+
+     base=(c=='b' || c=='B') ? (p="%[0-1]"      , 2) : 
+          (c=='o' || c=='O') ? (p="%[0-7]"      , 8) : 
+                               (p="%[0-9a-fA-F]", 16);
+     token.name[0]='\0';
+     Lib3(fscanf,in,p,token.name);
+
+     token.int_num=Lib3(strtol,token.name,NULL,base);
+     Read_Next_Char(in);
+     return;
+    }
+                                                           /* float number */
+ token.type=UNSIGNED_FLOAT;
+ *p++='.';
+ Read_Next_Char(in);
+ while(c_type==DI)
+    {
+     *p++=c;
+      Read_Next_Char(in);
+    }
+
+ if ((c=='e' || c=='E') && 
+     (Look_At_Next_Char(in)==DI || c_look=='+' || c_look=='-'))
+    {
+     Read_Next_Char(in);
+     *p++='e';
+     *p++=c;
+
+     Read_Next_Char(in);
+     while(c_type==DI)
+        {
+         *p++=c;
+          Read_Next_Char(in);
+        }
+    }
+
+ *p='\0';
+ Lib3(sscanf,token.name,"%lf",&token.float_num);
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* SCAN_QUOTED                                                             */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Scan_Quoted(FILE *in)
+
+{
+ char  c1;
+ char *s;
+ int   base;
+ char  escape_symbol[]="abfnrtv";
+ char  escape_char  []="\a\b\f\n\r\t\v";
+ char *p;
+ char  err[64];
+
+ *err='\0';
+ token.type=(c_type==QT) ? NAME : (c_type==DQ) ? STRING : BACK_QUOTED;
+ s=token.name;
+ c1=c;
+ for(;c_type!=EOF;)
+    {
+     Read_Next_Char(in);
+     if (c==c1)
+        {
+         Read_Next_Char(in);
+         if (c!=c1)                                      /* '' or "" or `` */
+             break;
+        }
+
+     if (c!='\\')
+        {
+         *s++ = c;
+         continue;
+        }
+                                                        /* escape sequence */
+     Read_Next_Char(in);
+     if (c=='\n')
+         continue;
+
+     if (Lib2(strchr,"\\'\"`",c))                  /* \\ or \' or \" or \` */
+        {                
+         *s++ =c;
+         continue;
+        }
+
+     if (p=(char *) Lib2(strchr,escape_symbol,c))  /* \a \b \f \n \r \t \v */
+        {
+         *s++ =escape_char[p-escape_symbol];
+         continue;
+        }
+
+     if (c=='x' || '0'<=c && c<='7')                         /* \xnn\ \nn\ */
+        {
+         base=(c=='x') ? (p="%[0-9a-fA-F]", 16) : 
+                         (Lib2(ungetc,c,in), p="%[0-7]", 8);
+         *s='\0';
+         Lib3(fscanf,in,p,s);
+         *s++ =Lib3(strtol,s,NULL,base);
+         Read_Next_Char(in);
+         if (c!='\\')
+            {
+             if (!*err)
+                 Lib2(strcpy,err,"\\ expected in \\constant\\ sequence");
+
+             if (c==c1)
+                 Lib2(ungetc,c,in);
+            }
+
+         continue;
+        }
+
+     if (!*err)
+         Lib3(sprintf,err,"unknown escape sequence \\%c",c);
+
+     if (c==c1)
+         Lib2(ungetc,c,in);
+    }
+ *s='\0';
+
+ if (*err)
+     Syntax_Error(in,err);
+
+ if (c_type==EOF)
+    {
+     s=(token.type==NAME) ? "quoted atom" : 
+                            (token.type==STRING) ? "string" : "back quotes";
+     token.type=NAME;
+     Syntax_Error(in,"EOF in %s",s);
+    }
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* PARSE_TERM                                                              */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static WamWord Parse_Term(FILE *in,int cur_prec,Bool comma_as_op)
+
+{
+ Bool     bracket;
+ Bool     inside_curly;
+ AtomInf *atom;
+ OperInf *oper;
+ Bool     infix_op;
+ int      cur_left=0;
+ int      i;
+ Bool     minus_op;
+ WamWord  term;
+ WamWord *save_reg_bank=reg_bank;
+ WamWord  local_reg_bank[REG_BANK_SIZE];
+
+ Switch_Reg_Bank(local_reg_bank);
+
+ switch(token.type)
+    {
+     case VARIABLE:
+         i=Lookup_In_Dico_Var(token.name);
+         if (++dico_var[i].nb_of_uses == 1)             /* first occurence */
+            {
+             put_x_variable(0,0)
+             dico_var[i].word=A(0);
+            }
+          else                                          /* other occurence */
+             A(0)=dico_var[i].word;
+
+         Scan_Token(in,comma_as_op);
+         break;
+
+     case NATURAL_NUMBER:
+         put_integer(token.int_num,0)
+         Scan_Token(in,comma_as_op);
+         break;
+
+     case UNSIGNED_FLOAT:
+         Syntax_Error(in,"float not supported");
+         break;
+
+     case NAME:
+     case BACK_QUOTED:                                   /* useless in ISO */
+         atom=Create_Allocate_Atom(token.name);
+         bracket=(c=='(');
+         minus_op=(Lib2(strcmp,token.name,"-")==0);
+         oper=Lookup_Oper(atom,PREFIX);
+         if (oper && !bracket && cur_prec<oper->prec)
+            {
+             A(0)=NULL_WORD;
+             goto finish;
+            }
+
+         Scan_Token(in,comma_as_op);
+
+         if (oper && !bracket)                          /* prefix operator */
+            {
+             if (minus_op)
+                {
+                 if (token.type==NATURAL_NUMBER)
+                    {
+                     token.int_num= -token.int_num;
+                     A(0)=Parse_Term(in,cur_prec,comma_as_op);	   
+		     goto finish;
+                    }
+
+                 if (token.type==UNSIGNED_FLOAT)
+                    {
+                     token.float_num= -token.float_num;
+                     A(0)=Parse_Term(in,cur_prec,comma_as_op);
+                     goto finish;		     
+                    }
+                }
+
+             A(0)=Parse_Term(in,oper->right,comma_as_op);
+             if (A(0)!=NULL_WORD)
+                {
+                 A(0)=Compound_Term(atom,1);
+                 break;
+                }
+
+             cur_left=oper->prec;                        /* prefix as name */
+            }
+                                                  /* not a prefix operator */
+         A(0)=Parse_Args_Of_Functor(in,comma_as_op,atom,bracket);
+         break;
+
+     case STRING:
+         i=Lib1(strlen,token.name);
+         if (i==0)
+             put_nil(0)
+          else
+            {
+             put_list(0)
+             --i;
+             unify_integer(token.name[i])
+             unify_nil
+             while(i--)
+                {
+                 put_list(1)
+                 unify_integer(token.name[i]);
+                 unify_x_value(0)
+                 A(0)=A(1);
+                }
+            }
+
+         Scan_Token(in,comma_as_op);
+         break;
+
+     case PONCTUATION:
+         if (!Lib2(strchr,"({[",token.ponct))
+            {
+             A(0)=NULL_WORD;
+             goto finish;
+            }
+             
+         inside_curly=(token.ponct=='{');
+
+         if ((A(0)=Parse_Bracketed_Term(in,comma_as_op,&bracket))==NULL_WORD)
+            {
+             atom=(inside_curly) ? atom_curly_brackets : atom_nil;/* {} [] */
+
+             A(0)=Parse_Args_Of_Functor(in,comma_as_op,atom,bracket);
+            }
+         break;
+
+     default:                                    /* END_OF_FILE, FULL_STOP */
+         A(0)=NULL_WORD;
+         goto finish;
+    }
+
+
+ while(token.type==NAME)
+    {
+     atom=Create_Allocate_Atom(token.name);
+     if (oper=Lookup_Oper(atom,INFIX))
+         infix_op=TRUE;
+      else
+         if (oper=Lookup_Oper(atom,POSTFIX))
+             infix_op=FALSE;
+
+     if (!oper || cur_prec<oper->prec || cur_left>oper->left)
+         break;
+
+     Scan_Token(in,comma_as_op);
+
+     if (infix_op)                                       /* infix operator */
+        {
+         A(1)=Parse_Term(in,oper->right,comma_as_op);
+
+         if (A(1)==NULL_WORD)
+             Syntax_Error(in,"right operand expected for %s",atom->name);
+
+         A(0)=Compound_Term(atom,2);
+        }
+      else
+         A(0)=Compound_Term(atom,1);                   /* postfix operator */
+
+     cur_left=oper->prec;
+    }
+
+
+finish:
+
+ term=A(0);
+ Switch_Reg_Bank(save_reg_bank);
+
+ return term;
+
+lab_fail:
+ return FALSE;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* PARSE_ARGS_OF_FUNCTOR                                                   */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static WamWord Parse_Args_Of_Functor(FILE *in,Bool comma_as_op,AtomInf *atom,
+                                     Bool bracket)
+
+{
+ WamWord  term;
+ WamWord *save_reg_bank=reg_bank;
+ WamWord  local_reg_bank[REG_BANK_SIZE];
+ int      i;
+
+ Switch_Reg_Bank(local_reg_bank);
+
+
+ if (!bracket)                                                  /* no args */
+     put_constant(atom,0)
+  else
+    {
+     i=0;
+     do
+        {
+         Scan_Token(in,FALSE);
+         A(i)=Parse_Term(in,MAX_ARG_OF_FUNCTOR_PREC,FALSE);
+
+         if (A(i++)==NULL_WORD)
+             Syntax_Error(in,"cannot start an expression\n");
+        }
+     while(token.type==PONCTUATION && token.ponct==',');
+
+     if (token.type!=PONCTUATION || token.ponct!=')')
+         Syntax_Error(in,", or ) expected\n");
+
+     A(0)=Compound_Term(atom,i);
+     Scan_Token(in,comma_as_op);
+    }
+
+finish:
+
+ term=A(0);
+ Switch_Reg_Bank(save_reg_bank);
+
+ return term;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* PARSE_BRACKETED_TERM                                                    */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static WamWord Parse_Bracketed_Term(FILE *in,Bool comma_as_op,Bool *bracket)
+
+{
+ WamWord term;
+ WamWord *save_reg_bank=reg_bank;
+ WamWord  local_reg_bank[REG_BANK_SIZE];
+
+ Switch_Reg_Bank(local_reg_bank);
+
+
+ switch(token.ponct)
+    {
+     case '(':
+         Scan_Token(in,TRUE);
+         if ((A(0)=Parse_Term(in,MAX_PREC,TRUE))==NULL_WORD)
+             Syntax_Error(in,"cannot start an expression");
+
+         if (token.type!=PONCTUATION || token.ponct!=')')
+             Syntax_Error(in,") or operator expected");
+         break;
+
+     case '{':
+         Scan_Token(in,TRUE);
+         A(0)=Parse_Term(in,MAX_PREC,TRUE);
+
+         if (token.type!=PONCTUATION || token.ponct!='}')
+             Syntax_Error(in,"} or operator expected");
+
+         if (A(0)!=NULL_WORD)                     /* A(0)==NULL_WORD if {} */
+             A(0)=Compound_Term(atom_curly_brackets,1);
+         break;
+
+    case '[':
+         Scan_Token(in,FALSE);
+         A(0)=Parse_List(in);                     /* A(0)==NULL_WORD if [] */
+
+         if (token.type!=PONCTUATION || token.ponct!=']')
+             Syntax_Error(in,"expression or ] expected in list");
+         break;
+
+    }
+
+ *bracket=(c=='(');
+ Scan_Token(in,comma_as_op);
+
+ term=A(0);
+ Switch_Reg_Bank(save_reg_bank);
+
+ return term;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* PARSE_LIST                                                              */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static WamWord Parse_List(FILE *in)
+
+{
+ WamWord  term;
+ WamWord *save_reg_bank=reg_bank;
+ WamWord  local_reg_bank[REG_BANK_SIZE];
+
+ Switch_Reg_Bank(local_reg_bank);
+
+ A(0)=Parse_Term(in,MAX_ARG_OF_FUNCTOR_PREC,FALSE);
+
+ if (A(0)==NULL_WORD)
+    {
+     A(2)=NULL_WORD;
+     goto finish;
+    }
+
+ if (token.type!=PONCTUATION || !Lib2(strchr,",|]",token.ponct))
+     Syntax_Error(in,", | ] or operator expected in list");
+
+ switch(token.ponct)
+    {
+     case ',':                                                /* [X,[...]] */
+         Scan_Token(in,FALSE);
+         A(1)=Parse_List(in);
+         break;
+
+     case '|':                                                    /* [X|Y] */
+         Scan_Token(in,FALSE);
+         A(1)=Parse_Term(in,MAX_ARG_OF_FUNCTOR_PREC,FALSE);
+         break;
+
+     case ']':                                                      /* [X] */
+         put_nil(1)
+         break;
+    }
+
+ if (A(1)==NULL_WORD)
+     Syntax_Error(in,"cannot start an expression");
+
+
+ put_list(2)
+ unify_x_value(0)
+ unify_x_value(1)
+
+
+finish:
+
+ term=A(2);
+ Switch_Reg_Bank(save_reg_bank);
+
+ return term;
+
+lab_fail:
+ return FALSE;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* COMPOUND_TERM                                                           */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static WamWord Compound_Term(AtomInf *atom,int n)
+
+{
+ int i;
+
+ if (atom==atom_dot && n==2)                            /* '.'(X,Y)==[X|Y] */
+    {
+     put_list(n)
+     unify_x_value(0)
+     unify_x_value(1)
+    }
+  else
+    {                                        /* n>0, args in A(0)...A(n-1) */
+     put_structure(atom,n,n)
+     for(i=0;i<n;i++)
+         unify_x_value(i)
+    }
+
+ return A(n);
+
+lab_fail:
+ return FALSE;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* LOOKUP_IN_DICO_VAR                                                      */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static int Lookup_In_Dico_Var(char *name)
+
+{
+ int  i;
+ Bool named;
+
+ if (name[0]!='_' || name[1]!='\0')
+    {
+     named=TRUE;
+     for(i=0;i<nb_var && Lib2(strcmp,name,dico_var[i].name)!=0;i++)
+         ;
+    }
+  else
+    {
+     named=FALSE;
+     i=nb_var;
+    }
+
+ if (i==nb_var)
+    {
+     Lib2(strcpy,dico_var[nb_var].name,name);
+     dico_var[nb_var].word      =NULL_WORD;
+     dico_var[nb_var].nb_of_uses=0;
+     dico_var[nb_var++].named   =named;
+    }
+
+ return i;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* SYNTAX_ERROR                                                            */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Syntax_Error(FILE *in,char *format,...)
+
+{
+ va_list arg_ptr;
+
+ if (disp_error && (syntax_error==atom_dec10 || syntax_error==atom_fail))
+    {
+     disp_error=FALSE;                                   /* scan quiet */
+    
+     Lib1(printf,"\n** ");
+     va_start(arg_ptr,format);
+     Lib2(vprintf,format,arg_ptr);
+     va_end(arg_ptr);
+    
+     Lib1(printf," ** here **\n");
+    }
+    
+ while(token.type!=FULL_STOP && token.type!=END_OF_FILE)
+    {
+     Display_Token();
+     Scan_Token(in,TRUE);
+    }
+ Display_Token();
+    
+ disp_error=TRUE;
+                                                    /* Syntax Error (Save) */
+ Save_Machine_Regs(buff_save_machine_regs)
+ longjmp(jumper,1);
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* DISPLAY_TOKEN                                                           */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Display_Token()
+
+{
+ if (syntax_error!=atom_dec10 && syntax_error!=atom_fail)
+     return;
+
+ switch(token.type)
+    {
+     case VARIABLE:
+     case NAME:
+     case STRING:
+     case BACK_QUOTED:
+         Lib2(printf,"%s ",token.name);
+         break;
+
+     case NATURAL_NUMBER:
+         Lib2(printf,"%d ",token.int_num);
+         break;
+
+     case UNSIGNED_FLOAT:
+         Lib2(printf,"%lg ",token.float_num);
+         break;
+
+     case PONCTUATION:
+         Lib2(printf,"%c ",token.ponct);
+         break;
+
+     case FULL_STOP:
+         Lib1(printf,".\n");
+         break;
+
+     case END_OF_FILE:
+         Lib1(printf,"end_of_file\n");
+         break;
+    }
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* INITIALIZE_USR                                                          */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Initialize_Usr(void)
+
+{
+ atom_syntax_error=Create_Atom("syntax_error");
+
+ atom_dec10=Create_Atom("dec10");
+ atom_error=Create_Atom("error");
+ atom_fail =Create_Atom("fail");
+ atom_quiet=Create_Atom("quiet");
+
+ atom_eof  =Create_Atom("end_of_file");
+ atom_equal=Create_Atom("=");
+}
+
+/* end of user file */
+
+#undef  fail
+#define fail Fail_Like_Wam
+
+

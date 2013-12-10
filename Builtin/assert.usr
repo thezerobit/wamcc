@@ -1,0 +1,270 @@
+/****************************************************************************
+Prolog to Wam Compiler                     INRIA Rocquencourt - ChLoE Project
+Version 2.1                                                Daniel Diaz - 1994
+
+file : assert.usr
+****************************************************************************/
+#include <stdlib.h>
+
+
+/*---------------------------------*/
+/* Constants                       */
+/*---------------------------------*/
+
+#define ERR_ILLEGAL_PRED_INDICATOR "\nError: Illegal predicte indicator\n"
+
+
+
+
+/*---------------------------------*/
+/* Type Definitions                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Global Variables                */
+/*---------------------------------*/
+
+static DynScan scan_info;
+
+
+
+
+/*---------------------------------*/
+/* Function Prototypes             */
+/*---------------------------------*/
+
+static Bool Get_Clause(void);
+static Bool Get_Clause_Next(void);
+
+
+
+          /*---------------------------------------------------------------*/
+          /* asserta1(C): adds a new clause (first)                        */
+          /*                                                               */
+          /* A(0) must be bound to a term of the form [H|B]                */
+          /*---------------------------------------------------------------*/
+
+#define Asserta1_1                                                          \
+    if (!Add_New_Clause(A(0),TRUE))                                         \
+        fail
+
+
+          /*---------------------------------------------------------------*/
+          /* assertz1(C): adds a new clause (last)                         */
+          /*                                                               */
+          /* A(0) must be bound to a term of the form [H|B]                */
+          /*---------------------------------------------------------------*/
+
+#define Assertz1_1                                                          \
+    if (!Add_New_Clause(A(0),FALSE))                                        \
+            fail
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* clause1(C): gets a clause                                     */
+          /*                                                               */
+          /* A(0) must be bound to a term of the form [H|B]                */
+          /*---------------------------------------------------------------*/
+
+#define Clause1_1                                                           \
+    if (!Get_Clause())                                                      \
+        fail                                                                \
+    get_x_value(0,1)
+
+
+
+
+
+Begin_Static_Wam_Code(Clause1_1_Next)
+    {
+     Prototype(Prefix(Clause1_1_Next))
+     if (!Get_Clause_Next())
+         fail
+
+     get_x_value(0,1)
+     proceed
+    }
+End_Pred
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* retract: removes the last clause fouidn by clause/2           */
+          /*                                                               */
+          /* always occurs after clause/2 so the info is in scan_info      */
+          /*---------------------------------------------------------------*/
+
+#define Retract_0                                                           \
+    Delete_Current_Clause(&scan_info);
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* abolish(F,N): deletes a dynamic predicate                     */
+          /*                                                               */
+          /* A(0) must be bound to an atom                                 */
+          /* A(1) must be bound to an INT                                  */
+          /*---------------------------------------------------------------*/
+
+#define Abolish_2                                                           \
+    {                                                                       \
+     AtomInf *functor;                                                      \
+     int      arity;                                                        \
+                                                                            \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag!=CST)                                                          \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_PRED_INDICATOR);                           \
+         fail                                                               \
+        }                                                                   \
+     functor=UnTag_CST(word);                                               \
+                                                                            \
+     Deref(A(1),word,tag,adr)                                               \
+     if (tag!=INT)                                                          \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_PRED_INDICATOR);                           \
+         fail                                                               \
+        }                                                                   \
+     arity=UnTag_INT(word);                                                 \
+                                                                            \
+     if (!Reinit_Dynamic_Pred(functor,arity,0))                             \
+         fail                                                               \
+    }
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* reinit_predicate(F,N,WhatToDo): reinitializes a dynamic pred  */
+          /*                                                               */
+          /* A(0) must be bound to an atom                                 */
+          /* A(1) must be bound to an INT                                  */
+          /* A(2) must be bound to an INT (see fct Reinit_Dynamic_Pred())  */
+          /*---------------------------------------------------------------*/
+
+#define Reinit_Predicate_3                                                  \
+    {                                                                       \
+     AtomInf *functor;                                                      \
+     int      arity;                                                        \
+     int      what_to_do;                                                   \
+                                                                            \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     functor=UnTag_CST(word);                                               \
+                                                                            \
+     Deref(A(1),word,tag,adr)                                               \
+     arity=UnTag_INT(word);                                                 \
+                                                                            \
+     Deref(A(2),word,tag,adr)                                               \
+     what_to_do=UnTag_INT(word);                                            \
+                                                                            \
+     if (!Reinit_Dynamic_Pred(functor,arity,what_to_do))                    \
+         fail                                                               \
+    }
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* new_consult: increments the consult counter                   */
+          /*                                                               */
+          /*---------------------------------------------------------------*/
+
+#define New_Consult_0                                                       \
+     consult_count++;
+
+
+
+
+/* Above this line, put your first macros (these included by pragma_c) */
+
+#undef  fail
+#define fail Fail_Like_Bool
+
+/* Below this line, put your others macros and your functions */
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* GET_CLAUSE                                                              */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool Get_Clause(void)
+
+{
+ Prototype(Prefix(Clause1_1_Next))
+
+ if (!Scan_First_Clause(A(0),&scan_info))
+     return FALSE;
+
+ if (!scan_info.is_last)
+    {
+     A(1)=(WamWord) (scan_info.xxx_is_seq_chain);
+     A(2)=(WamWord) (scan_info.xxx_ind_chain);
+     A(3)=(WamWord) (scan_info.var_ind_chain);
+
+     Create_Choice_Point((CodePtr) Prefix(Clause1_1_Next),4);
+    }
+
+ A(1)=scan_info.cur_word;
+
+ return TRUE;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* GET_CLAUSE_NEXT                                                         */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool Get_Clause_Next(void)
+
+{
+ Prototype(Prefix(Clause1_1_Next))
+
+ Update_Choice_Point((CodePtr) Prefix(Clause1_1_Next),1);
+
+ scan_info.xxx_is_seq_chain=(Bool)  AB(B,1);
+ scan_info.xxx_ind_chain   =(int *) AB(B,2);
+ scan_info.var_ind_chain   =(int *) AB(B,3);
+
+ if (!Scan_Next_Clause(&scan_info))
+     return FALSE;
+
+ if (scan_info.is_last)
+     B=(WamWord *) BB(B);
+  else
+    {
+/*   AB(B,1)=(WamWord) (scan_info.xxx_is_seq_chain);    not changed */
+     AB(B,2)=(WamWord) (scan_info.xxx_ind_chain);
+     AB(B,3)=(WamWord) (scan_info.var_ind_chain);
+    }
+
+
+ A(1)=scan_info.cur_word;
+ return TRUE;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* INITIALIZE_USR                                                          */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Initialize_Usr(void)
+
+{
+}
+
+/* end of user file */
+
+#undef  fail
+#define fail Fail_Like_Wam

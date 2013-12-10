@@ -1,0 +1,225 @@
+/****************************************************************************
+Prolog to Wam Compiler                     INRIA Rocquencourt - ChLoE Project
+Version 2.1                                                Daniel Diaz - 1994
+
+file : call.usr
+****************************************************************************/
+
+
+/*---------------------------------*/
+/* Constants                       */
+/*---------------------------------*/
+
+#define CALL_DYNAMIC               X63616C6C5F64796E616D6963
+
+
+
+
+#define ERR_UNDEFINED_PREDICATE    "\nError: Undefined predicate %s/%d\n"
+#define ERR_ILLEGAL_GOAL           "\nError: Illegal goal\n"
+#define ERR_HALT_INTEGER_EXPECTED  "\nError: integer expected in halt/1\n"
+
+
+
+
+/*---------------------------------*/
+/* Type Definitions                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Global Variables                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Function Prototypes             */
+/*---------------------------------*/
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* halt1(X): exits with the a return code                        */
+          /*                                                               */
+          /* A(0) must be bound to an INT                                  */
+          /*---------------------------------------------------------------*/
+
+#define Halt_1                                                              \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag==INT)                                                          \
+        {                                                                   \
+         Term_Wam_Engine();                                                 \
+         exit(UnTag_INT(word));                                             \
+        }                                                                   \
+                                                                            \
+     Lib1(printf,ERR_HALT_INTEGER_EXPECTED);                                \
+     fail
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* call1(P,VarCut,Module): calls the prolog goal P               */
+          /*                                                               */
+          /* A(0) must be bound to a Prolog goal                           */
+          /* A(1) is unused                                                */
+          /* A(2) bound to an INT (caller module nb)                       */
+          /*---------------------------------------------------------------*/
+
+#define Call1_3                                                             \
+    {                                                                       \
+     AtomInf *functor;                                                      \
+     int      arity;                                                        \
+     PredInf *pred;                                                         \
+     int      i;                                                            \
+                                                                            \
+     Deref(A(2),word,tag,adr)                                               \
+     calling_module_nb=UnTag_INT(word);                                     \
+                                                                            \
+     if ((functor=Get_Functor_Arity(A(0),&arity,&adr))==NULL)               \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_GOAL);                                     \
+         fail                                                               \
+        }                                                                   \
+                                                                            \
+     pred=Lookup_Pred(functor,arity,calling_module_nb);                     \
+     if (pred==NULL && (pred=Lookup_Pred(functor,arity,0))==NULL)           \
+        {                                                                   \
+         Lib3(printf,ERR_UNDEFINED_PREDICATE,functor->name,arity);          \
+         fail                                                               \
+        }                                                                   \
+                                                                            \
+     if (pred->codep==NULL)                                                 \
+         execute(Pred_Name(CALL_DYNAMIC,3),1,"call_dynamic",3)              \
+                                                                            \
+     for(i=0;i<arity;i++)                                                   \
+         A(i)=*adr++;                                                       \
+                                                                            \
+     Debug_Call(functor->name,arity,                                        \
+                module_tbl[pred->owner_mod_nb].debug_level);                \
+     Call_Execute_Prefix                                                    \
+     M_Indirect_Goto(pred->codep)                                           \
+    }
+
+
+
+
+          /*----------------------------------------------------------*/
+          /* The following code corresponds to the compilation of:    */
+          /*                                                          */
+          /* call_dynamic(P,_,Module):- ... see in call.pl            */
+          /*                                                          */
+          /* except that I have added one permanent variable so       */
+          /* allocate(3) becomes allocate(4) and debugger.c uses Y(3) */
+          /* to store the invocation number associated to A(0).       */
+          /*----------------------------------------------------------*/
+
+
+#define ASCII_PRED "call_dynamic"
+#define PRED       X63616C6C5F64796E616D6963
+#define ARITY      3
+
+Begin_Private_Pred
+      allocate(4)
+      get_x_variable(3,0)
+      get_y_variable(0,2)
+      get_y_bc_reg(1)
+      pragma_c(Debug_Call(NULL,0,1);)
+      put_list(0)
+      unify_x_local_value(3)
+      unify_y_variable(2)
+      call(Pred_Name(X636C6175736531,1),0,3,1,"clause1",1)          /* begin sub 1 */
+      pragma_c(Debug_Dynamic_Body();)
+      put_y_value(2,0)
+      put_y_unsafe_value(1,1)
+      put_y_value(0,2)
+      call(Pred_Name(X63616C6C31,3),0,0,2,"call1",3)          /* begin sub 2 */
+      pragma_c(Debug_Proceed(TRUE);)
+      deallocate
+      proceed
+
+End_Pred
+
+#undef ASCII_PRED
+#undef PRED
+#undef ARITY
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* catch_signal_1(Sig): captures a signal                        */
+          /*                                                               */
+          /* A(0) will be unified with an INT                              */
+          /*---------------------------------------------------------------*/
+
+#define Catch_Signal_1                                                      \
+     Deref(A(0),word,tag,adr)                                               \
+     Capture_Signal(UnTag_INT(word));
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* get_current_B(B): reads B register                            */
+          /*                                                               */
+          /* A(0) will be unified with an INT                              */
+          /*---------------------------------------------------------------*/
+
+#define Get_Current_B_1                                                     \
+     get_integer(Local_Offset(B),0)
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* set_current_B(B): sets B register                             */
+          /*                                                               */
+          /* A(0) must be an INT                                           */
+          /*---------------------------------------------------------------*/
+
+#define Set_Current_B_1                                                     \
+     Deref(A(0),word,tag,adr)                                               \
+     B=Local_Stack+UnTag_INT(word);
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* current_caller_module(Module): reads/sets caller_module_nb    */
+          /*                                                               */
+          /* A(0) is a variable (read) or an INT (set)                     */
+          /*---------------------------------------------------------------*/
+
+#define Current_Caller_Module_1                                             \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag==INT)                                                          \
+         caller_module_nb=UnTag_INT(word);                                  \
+      else                                                                  \
+         get_integer(caller_module_nb,0)
+
+
+
+
+/* Above this line, put your first macros (these included by pragma_c) */
+
+#undef  fail
+#define fail Fail_Like_Bool
+
+/* Below this line, put your others macros and your functions */
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* INITIALIZE_USR                                                          */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Initialize_Usr(void)
+
+{
+}
+
+/* end of user file */
+
+#undef  fail
+#define fail Fail_Like_Wam

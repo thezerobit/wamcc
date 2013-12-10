@@ -1,0 +1,156 @@
+/****************************************************************************
+Prolog to Wam Compiler                     INRIA Rocquencourt - ChLoE Project
+Version 2.0                                                Daniel Diaz - 1994
+
+file : oper.usr
+****************************************************************************/
+#include <string.h>
+
+/*---------------------------------*/
+/* Constants                       */
+/*---------------------------------*/
+
+#define ERR_ILLEGAL_OP_ARGUMENT    "\nError: Illegal op/3 argument\n"
+#define ERR_INFIX_POSTFIX_CONFLICT "\nError: ambigous infix/postfix operator\n"
+
+
+
+/*---------------------------------*/
+/* Type Definitions                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Global Variables                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Function Prototypes             */
+/*---------------------------------*/
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* op2(Oper,Prec,Assoc): declares an operator                    */
+          /*                                                               */
+          /* A(0) must be unified with an atom                             */
+          /* A(0) must be unified with an integer                          */
+          /* A(0) must be unified with an atom fx fy xfx yfx xfy xf yf     */
+          /*---------------------------------------------------------------*/
+
+#define Op2_3                                                               \
+     if (!Declare_Oper())                                                   \
+         fail
+
+
+
+/* Above this line, put your first macros (these included by pragma_c) */
+
+#undef  fail
+#define fail Fail_Like_Bool
+
+/* Below this line, put your others macros and your functions */
+
+
+
+/*-------------------------------------------------------------------------*/
+/* DECLARE_OPER                                                            */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool Declare_Oper(void)
+
+{
+ WamWord  word,tag,*adr;
+ AtomInf *atom;
+ int      prec;
+ char    *assoc;
+ char    *a[7]={"fx","fy","xf","yf","xfx","xfy","yfx"};
+ int      type,left,right;
+ char     i;
+
+ Deref(A(0),word,tag,adr)
+ if (tag!=CST)
+    {
+     Lib1(printf,ERR_ILLEGAL_OP_ARGUMENT);
+     return FALSE;
+    }
+ atom=UnTag_CST(word);
+
+ Deref(A(1),word,tag,adr)
+ prec=UnTag_INT(word);
+ if (tag!=INT || prec<0 || prec>MAX_PREC)
+    {
+     Lib1(printf,ERR_ILLEGAL_OP_ARGUMENT);
+     return FALSE;
+    }
+ 
+ Deref(A(2),word,tag,adr)
+ if (tag!=CST)
+    {
+     Lib1(printf,ERR_ILLEGAL_OP_ARGUMENT);
+     return FALSE;
+    }
+
+ assoc=UnTag_CST(word)->name;
+ for(i=0;i<7 && Lib2(strcmp,a[i],assoc)!=0;i++)
+     ;
+
+ switch(i)
+    {
+     case 0:
+     case 1:
+         type =PREFIX;
+         left =0;
+         right=(i==0) ? prec-1 : prec;
+         break;
+
+     case 2:
+     case 3:
+         type =POSTFIX;
+         left =(i==2) ? prec-1 : prec;
+         right=0;
+         break;
+
+     case 4:
+     case 5:
+     case 6:
+         type =INFIX;
+         left =(i==4 || i==5) ? prec-1 : prec;
+         right=(i==4 || i==6) ? prec-1 : prec;
+         break;
+
+     default:
+         Lib1(printf,ERR_ILLEGAL_OP_ARGUMENT);
+         return FALSE;
+    }
+
+ if (type==INFIX || type==POSTFIX)
+    {
+     int type1=(type==INFIX) ? POSTFIX : INFIX;
+
+     if (Lookup_Oper(atom,type1))
+        {
+         Lib1(printf,ERR_INFIX_POSTFIX_CONFLICT);
+         return FALSE;
+        }
+    }
+
+ Create_Oper(atom,type,prec,left,right);
+ return TRUE;
+}
+
+
+
+/*-------------------------------------------------------------------------*/
+/* INITIALIZE_USR                                                          */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Initialize_Usr(void)
+
+{
+}
+
+/* end of user file */
+
+#undef  fail
+#define fail Fail_Like_Wam

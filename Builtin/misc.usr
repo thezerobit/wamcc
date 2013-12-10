@@ -1,0 +1,447 @@
+/****************************************************************************
+Prolog to Wam Compiler                     INRIA Rocquencourt - ChLoE Project
+Version 2.1                                                Daniel Diaz - 1994
+
+file : misc.usr
+****************************************************************************/
+#include <stdlib.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+int getrusage();
+int access();
+int chdir();
+int system();
+
+
+
+
+/*---------------------------------*/
+/* Constants                       */
+/*---------------------------------*/
+
+#define ERR_ILLEGAL_ARGUMENT       "\nError: Illegal argument\n"
+
+
+
+
+/*---------------------------------*/
+/* Type Definitions                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Global Variables                */
+/*---------------------------------*/
+
+static long start_usr_time;                             /* in milliseconds */
+static long last_usr_time;
+
+static long start_sys_time;                             /* in milliseconds */
+static long last_sys_time;
+
+static AtomInf *atom_runtime;
+static AtomInf *atom_systime;
+static AtomInf *atom_stack[NB_OF_STACKS];
+
+
+
+
+/*---------------------------------*/
+/* Function Prototypes             */
+/*---------------------------------*/
+
+static
+void     Display_Statistics     (void);
+
+static 
+void     Stack_Size             (int stack_nb,int *used,int *free);
+
+static 
+void     User_Time              (int *since_start,int *since_last);
+
+static 
+void     System_Time            (int *since_start,int *since_last);
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* statistics(S,L): gets some statistics                         */
+          /*                                                               */
+          /* A(0) must be unified with an atom                             */
+          /* A(1) will be unified with either a list of 2 INT              */
+          /*---------------------------------------------------------------*/
+
+#define Statistics_2                                                        \
+    {                                                                       \
+     AtomInf *atom;                                                         \
+     int x= -1,y,i;                                                         \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag==CST)                                                          \
+        {                                                                   \
+         atom=UnTag_CST(word);                                              \
+         if (atom==atom_runtime)                                            \
+             User_Time(&x,&y);                                              \
+          else                                                              \
+             if (atom==atom_systime)                                        \
+                 System_Time(&x,&y);                                        \
+              else                                                          \
+                 for(i=0;i<NB_OF_STACKS;i++)                                \
+                     if (atom==atom_stack[i])                               \
+                         Stack_Size(i,&x,&y);                               \
+        }                                                                   \
+                                                                            \
+     if (x== -1)                                                            \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }                                                                   \
+                                                                            \
+     get_list(1)                                                            \
+     unify_integer(x)                                                       \
+     unify_x_variable(1)                                                    \
+     get_list(1)                                                            \
+     unify_integer(y)                                                       \
+     unify_nil                                                              \
+    }
+
+
+
+
+
+          /* Unix Arguments */
+
+
+
+          /*---------------------------------------------------------------*/
+          /* argc(N): gets the number of unix arguments                    */
+          /*                                                               */
+          /* A(0) will be unified with an INT                              */
+          /*---------------------------------------------------------------*/
+
+#define Argc_1                                                              \
+     get_integer(unix_argc,0)
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* argv(N,A): gets the nth unix argument (in A)                  */
+          /*                                                               */
+          /* A(0) must be bound to an INT                                  */
+          /* A(1) will be unified with a CST                               */
+          /*---------------------------------------------------------------*/
+
+#define Argv_2                                                              \
+    {                                                                       \
+     AtomInf *atom;                                                         \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     word=UnTag_INT(word);                                                  \
+     if (tag!=INT || word<0 || word>=unix_argc)                             \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }                                                                   \
+                                                                            \
+     atom=Create_Atom(unix_argv[word]);                                     \
+     get_constant(atom,1)                                                   \
+    }
+
+
+
+
+          /* unix interface */
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* unix_access(P,M): tests the access of P in mode M             */
+          /*                                                               */
+          /* A(0) must be bound to an atom                                 */
+          /* A(1) must be bound to an INT                                  */
+          /*---------------------------------------------------------------*/
+
+#define Unix_Access_2                                                       \
+    {                                                                       \
+     char *path;                                                            \
+     int   mode;                                                            \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag!=CST)                                                          \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }                                                                   \
+     path=UnTag_CST(word)->name;                                            \
+                                                                            \
+     Deref(A(1),word,tag,adr)                                               \
+     if (tag!=INT)                                                          \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }                                                                   \
+     mode=UnTag_INT(word);                                                  \
+                                                                            \
+     if (Lib2(access,path,mode)== -1)                                       \
+         fail                                                               \
+    }
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* unix_cd(P): changes current directory                         */
+          /*                                                               */
+          /* A(0) must be bound to an atom                                 */
+          /*---------------------------------------------------------------*/
+
+#define Unix_Cd_1                                                           \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag!=CST)                                                          \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }                                                                   \
+                                                                            \
+     if (Lib1(chdir,UnTag_CST(word)->name))                                 \
+         fail
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* unix_getenv(N,V): gets the value V of environment variable N  */
+          /*                                                               */
+          /* A(0) must be bound to an atom                                 */
+          /* A(1) will be unified with an atom                             */
+          /*---------------------------------------------------------------*/
+
+#define Unix_Getenv_2                                                       \
+    {                                                                       \
+     AtomInf *atom;                                                         \
+     char *p;                                                               \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag!=CST)                                                          \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }                                                                   \
+                                                                            \
+     if ((p=(char *) Lib1(getenv,UnTag_CST(word)->name))==NULL)             \
+         fail                                                               \
+                                                                            \
+     atom=Create_Atom(p);                                                   \
+     get_constant(atom,1)                                                   \
+    }
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* unix_system(C,S): executes command C and returns its status S */
+          /*                                                               */
+          /* A(0) must be bound to an atom                                 */
+          /* A(1) will be unified with an atom                             */
+          /*---------------------------------------------------------------*/
+
+#define Unix_System_2                                                       \
+    {                                                                       \
+     int status;                                                            \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag!=CST)                                                          \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }                                                                   \
+                                                                            \
+     status=Lib1(system,UnTag_CST(word)->name);                             \
+     get_integer(status,1)                                                  \
+    }
+
+
+
+
+/* Above this line, put your first macros (these included by pragma_c) */
+
+#undef  fail
+#define fail Fail_Like_Bool
+
+/* Below this line, put your others macros and your functions */
+
+
+
+
+struct rusage rsr_usage;
+
+#define Get_Times(usr_time,sys_time)                                        \
+     Lib2(getrusage,RUSAGE_SELF,&rsr_usage);                                \
+                                                                            \
+     usr_time=M_Mul(rsr_usage.ru_utime.tv_sec, 1000) +                      \
+              M_Div(rsr_usage.ru_utime.tv_usec,1000);                       \
+     sys_time=M_Mul(rsr_usage.ru_stime.tv_sec, 1000) +                      \
+              M_Div(rsr_usage.ru_stime.tv_usec,1000);
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* STACK_SIZE                                                              */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Stack_Size(int stack_nb,int *used,int *free)
+
+{
+ *used=Stack_Top(stack_nb)-stk_tbl[stack_nb].stack;
+ *free=stk_tbl[stack_nb].size- *used;
+
+ if (stk_tbl[stack_nb].stack==Global_Stack)         /* see Init_Wam_Engine */
+     *used += REG_BANK_SIZE;
+
+ *used *= sizeof(WamWord);
+ *free *= sizeof(WamWord);
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* USER_TIME                                                               */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void User_Time(int *since_start,int *since_last)
+
+{
+ long usr_time;
+ long sys_time;
+
+ Get_Times(usr_time,sys_time)
+
+ *since_start=usr_time - start_usr_time;
+ *since_last =usr_time - last_usr_time;
+ last_usr_time=usr_time;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* SYSTEM_TIME                                                             */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void System_Time(int *since_start,int *since_last)
+
+{
+ long usr_time;
+ long sys_time;
+
+ Get_Times(usr_time,sys_time)
+
+ *since_start=sys_time - start_sys_time;
+ *since_last =sys_time - last_sys_time;
+ last_sys_time=sys_time;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* DISPLAY_STATISTICS                                                      */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Display_Statistics(void)
+
+{
+ int  used,free;
+ long usr_time;
+ long sys_time;
+ long since_start_usr_time;
+ long since_last_usr_time;
+ long since_start_sys_time;
+ long since_last_sys_time;
+ int  i;
+
+
+ Lib1(printf,"Stacks:\n");
+
+ for(i=0;i<NB_OF_STACKS;i++)
+    {
+     Stack_Size(i,&used,&free);
+
+     Lib5(printf,"   %-6s stack:%10d bytes   %10d in use   %10d free\n",
+          stk_tbl[i].name,used+free,used,free);
+    }
+
+ Lib1(printf,"\n");
+ 
+ Get_Times(usr_time,sys_time)
+ 
+ since_start_usr_time=usr_time - start_usr_time;
+ since_last_usr_time =usr_time - last_usr_time;
+ last_usr_time=usr_time;
+
+ since_start_sys_time=sys_time - start_sys_time;
+ since_last_sys_time =sys_time - last_sys_time;
+ last_sys_time=sys_time;
+
+
+ Lib1(printf,"User time:\n");
+ Lib3(printf,"   since start:%9.3lf sec.  since last statistics: %9.3lf sec.\n\n",
+        (double) since_start_usr_time/1000.0,
+        (double) since_last_usr_time/1000.0);
+
+
+ Lib1(printf,"System time:\n");
+ Lib3(printf,"   since start:%9.3lf sec.  since last statistics: %9.3lf sec.\n\n",
+        (double) since_start_sys_time/1000.0,
+        (double) since_last_sys_time/1000.0);
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* DISPLAY_VERSION                                                         */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+void Display_Version(void)
+
+{
+ Lib2(printf,"%-40s   INRIA Rocquencourt - ChLoE Project\n",COMPILER);
+ Lib3(printf,"Version %-45s      Daniel Diaz - %d\n\n",WAM_VERSION,WAM_YEAR);
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* INITIALIZE_USR                                                          */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Initialize_Usr(void)
+
+{
+ int i;
+
+ Get_Times(start_usr_time,start_sys_time)
+ last_usr_time=start_usr_time;
+ last_sys_time=start_sys_time;
+
+ atom_runtime=Create_Atom("runtime");
+ atom_systime=Create_Atom("systime");
+
+ for(i=0;i<NB_OF_STACKS;i++)
+     atom_stack[i]=Create_Atom(stk_tbl[i].name);
+}
+
+
+
+
+/* end of user file */
+
+#undef  fail
+#define fail Fail_Like_Wam
+

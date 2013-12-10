@@ -1,0 +1,419 @@
+/****************************************************************************
+Prolog to Wam Compiler                     INRIA Rocquencourt - ChLoE Project
+Version 2.1                                                Daniel Diaz - 1994
+
+file : format.usr
+****************************************************************************/
+#include <string.h>
+
+long strtol();
+int  fprintf();
+int  fputc();
+
+
+
+
+/*---------------------------------*/
+/* Constants                       */
+/*---------------------------------*/
+
+#define ERR_ILLEGAL_ARGUMENT       "\nError: Illegal argument\n"
+
+
+
+
+/*---------------------------------*/
+/* Type Definitions                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Global Variables                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Function Prototypes             */
+/*---------------------------------*/
+
+static 
+Bool      Format                (FILE *out,char *format,WamWord *lst_adr);
+
+static 
+Bool      Read_Arg              (WamWord **lst_adr,WamWord *word,
+                                 WamWord *tag);
+
+static
+Bool      Arg_Integer           (WamWord tag,WamWord *word);
+
+static 
+Bool      Write_String          (FILE *out,int length,WamWord start_word);
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* Formata(Format,LArgs): prints LArgs according to format Format*/
+          /*                                                               */
+          /* A(0) must be bound to a CST                                   */
+          /* A(1) must be bound to a LST                                   */
+          /*---------------------------------------------------------------*/
+
+#define Formata_2                                                           \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag!=CST || !Format(output,UnTag_CST(word)->name,&A(1)))           \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }
+
+
+
+
+/* Above this line, put your first macros (these included by pragma_c) */
+
+#undef  fail
+#define fail Fail_Like_Bool
+
+/* Below this line, put your others macros and your functions */
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* FORMAT                                                                  */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool Format(FILE *out,char *format,WamWord *lst_adr)
+
+{
+ WamWord  word,tag,*adr;
+ char     str[256],*p;
+ int      n,n1;
+ int      lg,stop;
+ int      i,k;
+ char    *format_stack[256];
+ char   **top_stack=format_stack;
+
+ *top_stack++=format;
+ do
+    {
+     format= *--top_stack;
+
+     while(*format)
+        {
+         if (*format=='%')                    /* classical C printf format */
+            {
+             p=str;
+             n=n1= -1;
+
+             do
+                 if ((*p++=*format++)=='*')
+                    {
+                     if (!Read_Arg(&lst_adr,&word,&tag) ||
+                         !Arg_Integer(tag,&word))
+                         return FALSE;
+
+                     if (n== -1)
+                         n=UnTag_INT(word);
+                      else
+                         n1=UnTag_INT(word);
+                    }
+             while((char *) Lib2(strchr,"diopuxXfeEgGcsn",format[-1])==NULL);
+
+             *p='\0';
+
+             if (!Read_Arg(&lst_adr,&word,&tag) ||
+                 tag!=CST && !Arg_Integer(tag,&word))
+                 return FALSE;
+
+             i=(Tag_Of(word)==INT) ? UnTag_INT(word)
+                                   : (int) (UnTag_CST(word)->name);
+
+             if (n!= -1)
+                 if (n1 != -1)
+                     Lib5(fprintf,out,str,n,n1,i);
+                  else
+                     Lib4(fprintf,out,str,n,i);
+              else
+                 Lib3(fprintf,out,str,i);
+
+             continue;
+            }
+
+         if (*format!='~')
+            {
+             Lib2(fputc,*format,out);
+             format++;
+             continue;
+            }
+
+         if (*++format=='*')
+            {
+             if (!Read_Arg(&lst_adr,&word,&tag) || !Arg_Integer(tag,&word))
+                 return FALSE;
+
+             n=UnTag_INT(word);
+             format++;
+            }
+          else
+             n=Lib3(strtol,format,&format,10);
+
+
+
+         switch(*format)
+            {
+             case 'a':
+                 if (!Read_Arg(&lst_adr,&word,&tag) || tag!=CST)
+                     return FALSE;
+
+                 Lib3(fprintf,out,"%s",UnTag_CST(word)->name);
+                 break;
+
+             case 'c':
+                 if (!Read_Arg(&lst_adr,&word,&tag) || !Arg_Integer(tag,&word))
+                     return FALSE;
+
+                 do
+                     Lib2(fputc,UnTag_INT(word),out);
+                 while(--n>0);
+                 break;
+
+             case 'd':
+             case 'D':
+                 if (!Read_Arg(&lst_adr,&word,&tag) || !Arg_Integer(tag,&word))
+                     return FALSE;
+
+                 word=UnTag_INT(word);
+                 if (n==0 && *format=='d')
+                    {
+                     Lib3(fprintf,out,"%d",word);
+                     break;
+                    }
+
+                 if (word<0)
+                    {
+                     Lib2(fputc,'-',out);
+                     word= -word;
+                    }
+
+                 Lib3(sprintf,str,"%d",word);
+                 lg=Lib1(strlen,str)-n;
+                 if (lg<=0)
+                    {
+                     Lib2(fprintf,out,"0.");
+                     for(i=0;i< -lg;i++)
+                         Lib2(fputc,'0',out);
+                     Lib3(fprintf,out,"%d",word);
+                     break;
+                    }
+
+
+                 stop=(*format=='D') ? M_Mod(lg,3) : -1;
+
+                 if (stop==0)
+                     stop=3;
+
+                 for(p=str,i=0;*p;p++,i++)
+                    {
+                     if (i==lg)
+                         Lib2(fputc,'.',out), stop= -1;
+
+                     if (i==stop)
+                         Lib2(fputc,',',out), stop+=3;
+                     Lib2(fputc,*p,out);
+                    }
+                 break;
+
+             case 'r':
+             case 'R':
+                 if (!Read_Arg(&lst_adr,&word,&tag) || !Arg_Integer(tag,&word))
+                     return FALSE;
+
+                 if (n<2 || n>36)
+                     n=8;
+
+                 k=((*format=='r') ? 'a' : 'A')-10;
+
+                 word=UnTag_INT(word);
+                 if (word<0)
+                    {
+                     Lib2(fputc,'-',out);
+                     word= -word;
+                    }
+
+                 p=str+sizeof(str)-1;
+                 *p='\0';
+                 do
+                    {
+                     i=M_Mod(word,n);
+                     word=M_Div(word,n);
+                     --p;
+                     *p=(i<10) ? i+'0' : i+k;
+                    }
+                 while(word);
+                 Lib3(fprintf,out,"%s",p);
+                 break;
+
+             case 's':
+                 if (!Read_Arg(&lst_adr,&word,&tag))
+                     return FALSE;
+
+                 if (!Write_String(out,(n) ? n : -1,word))
+                     return FALSE;
+                 break;
+
+             case 'i':
+                 if (!Read_Arg(&lst_adr,&word,&tag))
+                     return FALSE;
+                 break;
+
+             case 'k':
+                 if (!Read_Arg(&lst_adr,&word,&tag))
+                     return FALSE;
+
+                 Complex_Write_Term(output,-1,TRUE,FALSE,TRUE,word);
+                 break;
+
+             case 'q':
+                 if (!Read_Arg(&lst_adr,&word,&tag))
+                     return FALSE;
+
+                 Complex_Write_Term(output,-1,TRUE,TRUE,TRUE,word);
+                 break;
+
+             case 'w':
+                 if (!Read_Arg(&lst_adr,&word,&tag))
+                     return FALSE;
+
+                 Complex_Write_Term(output,-1,FALSE,TRUE,FALSE,word);
+                 break;
+
+             case '~':
+                 Lib2(fputc,'~',out);
+                 break;
+ 
+             case 'n':
+             case 'N':
+                 do
+                     Lib2(fputc,'\n',out);
+                 while(--n>0);
+                 break;
+ 
+             case '?':
+                 if (!Read_Arg(&lst_adr,&word,&tag) || tag!=CST)
+                     return FALSE;
+
+                 if (format[1])
+                     *top_stack++=format+1;
+
+                 format=UnTag_CST(word)->name;
+                 continue;
+                 
+             default:
+                 return FALSE;
+            }
+         format++;
+        }
+    }
+ while(top_stack>format_stack);
+
+
+ return TRUE;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* READ_ARG                                                                */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool Read_Arg(WamWord **lst_adr,WamWord *word,WamWord *tag)
+
+{
+ WamWord *adr;
+ WamWord *cur_adr;
+
+ Deref(**lst_adr,*word,*tag,adr)
+
+ if (*tag!=LST)
+     return FALSE;
+
+ adr=UnTag_LST(*word);
+ cur_adr=&Car(adr);
+ *lst_adr=&Cdr(adr);
+
+ Deref(*cur_adr,*word,*tag,adr);
+
+ return TRUE;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* ARG_INTEGER                                                             */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool Arg_Integer(WamWord tag,WamWord *word)
+
+{
+ return (tag==INT || Load_Math_Expression(*word,word));
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* WRITE_STRING                                                            */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool Write_String(FILE *out,int length,WamWord start_word)
+
+{
+ WamWord word,tag,*adr;
+ WamWord *adr1;
+
+ if (length==0)
+     return TRUE;
+
+ Deref(start_word,word,tag,adr)
+ if (tag==CST && UnTag_CST(word)==atom_nil)
+    {
+     if (length>0)
+         Lib4(fprintf,out,"%*s",length,"");
+     return TRUE;
+    }
+
+ if (tag!=LST)
+    {
+     Lib1(printf,ERR_ILLEGAL_ARGUMENT);
+     return FALSE;
+    }
+
+ adr1=UnTag_LST(word);
+
+ Deref(Car(adr1),word,tag,adr)
+ Lib2(fputc,UnTag_INT(word),out);
+
+ return Write_String(out,length-1,Cdr(adr1));
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* INITALIZE_USR                                                           */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Initialize_Usr(void)
+
+{
+}
+
+
+
+
+/* end of user file */
+
+#undef  fail
+#define fail Fail_Like_Wam

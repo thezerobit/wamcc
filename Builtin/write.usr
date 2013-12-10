@@ -1,0 +1,576 @@
+/****************************************************************************
+Prolog to Wam Compiler                     INRIA Rocquencourt - ChLoE Project
+Version 2.1                                                Daniel Diaz - 1994
+
+file : write.usr
+****************************************************************************/
+int fprintf();
+int fputc();
+
+/*---------------------------------*/
+/* Constants                       */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Type Definitions                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Global Variables                */
+/*---------------------------------*/
+
+static WamWord  curly_brackets_1;
+static WamWord  dollar_var_1;
+
+static AtomInf *atom_dots;
+static AtomInf *atom_comma;
+static int      last_writing=NOT_AN_ATOM;
+
+
+
+
+/*---------------------------------*/
+/* Function Prototypes             */
+/*---------------------------------*/
+
+static 
+Bool      Write_Term_With_Opts  (FILE *ou);
+
+void      Simple_Write_Term     (WamWord start_word);
+
+void      Complex_Write_Term    (FILE *out,int depth,
+                                 Bool quote,Bool op,Bool number_vars,
+                                 WamWord start_word);
+
+static
+void      Write_Term            (FILE *out,int depth,int prec,
+                                 Bool quote,Bool op,Bool number_vars,
+                                 WamWord start_word);
+static
+void      Write_Global_Var      (FILE *out,Bool op,WamWord *adr);
+
+static
+void      Write_Atom            (FILE *out,int prec,
+                                 Bool quote,Bool op,
+                                 AtomInf *atom);
+
+static 
+void      Write_Integer         (FILE *out,Bool op,int x);
+
+static
+void      Write_List_Arg        (FILE *out,int depth,int prec,
+                                 Bool quote,Bool op,Bool number_vars,
+                                 WamWord *lst_value);
+static 
+void      Write_Structure       (FILE *out,int depth,int prec,
+                                 Bool quote,Bool op,Bool number_vars,
+                                 WamWord *stc_value);
+
+
+
+          /*---------------------------------------------------------------*/
+          /* write(X): writes a term on stdout                             */
+          /*                                                               */
+          /* A(0) must be bound to a Prolog term                           */
+          /*---------------------------------------------------------------*/
+
+#define Write_1                                                             \
+     last_writing=NOT_AN_ATOM;                                              \
+     Write_Term(output,-1,MAX_PREC,FALSE,TRUE,TRUE,A(0));
+
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* writeq(X): writes a term on output (with quotes if necessary) */
+          /*                                                               */
+          /* A(0) must be bound to a Prolog term                           */
+          /*---------------------------------------------------------------*/
+
+#define Writeq_1                                                            \
+     last_writing=NOT_AN_ATOM;                                              \
+     Write_Term(output,-1,MAX_PREC,TRUE,TRUE,TRUE,A(0));
+
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* write_canonical(X): writes a term on output (canonical form)  */
+          /*                                                               */
+          /* A(0) must be bound to a Prolog term                           */
+          /*---------------------------------------------------------------*/
+
+#define Write_Canonical_1                                                   \
+     last_writing=NOT_AN_ATOM;                                              \
+     Write_Term(output,-1,MAX_PREC,TRUE,FALSE,FALSE,A(0));
+
+
+
+
+#define Write_Term_5                                                        \
+     if (!Write_Term_With_Opts(output))                                     \
+         fail
+
+
+
+
+/* Above this line, put your first macros (these included by pragma_c) */
+
+#undef  fail
+#define fail Fail_Like_Bool
+
+/* Below this line, put your others macros and your functions */
+
+
+#define  Write_Char(o,c)        Lib2(fputc,c,o),                            \
+                                last_writing=NOT_AN_ATOM
+
+#define  Write_String(o,s)      Lib2(fprintf,o,s),                          \
+                                last_writing=NOT_AN_ATOM
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* WRITE_TERM_OPTS                                                         */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool Write_Term_With_Opts(FILE *out)
+
+{
+ WamWord word,tag,*adr;
+ int     depth;
+ Bool    quote,op,number_vars;
+
+ Deref(A(1),word,tag,adr)
+ depth=UnTag_INT(word);
+
+ Deref(A(2),word,tag,adr)
+ quote=UnTag_INT(word);
+
+ Deref(A(3),word,tag,adr)
+ op=UnTag_INT(word);
+
+ Deref(A(4),word,tag,adr)
+ number_vars=UnTag_INT(word);
+
+ 
+ last_writing=NOT_AN_ATOM;
+
+ Write_Term(out,depth,MAX_PREC,quote,op,number_vars,A(0));
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* SIMPLE_WRITE_TERM                                                       */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+void Simple_Write_Term(WamWord start_word)
+
+{
+ last_writing=NOT_AN_ATOM;
+
+ Write_Term(stdout,-1,MAX_PREC,FALSE,TRUE,TRUE,start_word);/* like write/1 */
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* COMPLEX_WRITE_TERM                                                      */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+void Complex_Write_Term(FILE *out,int depth,
+                        Bool quote,Bool op,Bool number_vars,
+                        WamWord start_word)
+
+{
+ last_writing=NOT_AN_ATOM;
+
+ Write_Term(out,depth,MAX_PREC,quote,op,number_vars,start_word);
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* WRITE_TERM                                                              */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+void Write_Term(FILE *out,int depth,int prec,
+                Bool quote,Bool op,Bool number_vars,
+                WamWord start_word)
+
+{
+ WamWord word,tag,*adr;
+
+ if (depth==0)
+    {
+     Write_Atom(out,prec,quote,op,atom_dots);
+     return;
+    }
+
+ Deref(start_word,word,tag,adr)
+
+ switch(tag)
+    {
+     case REF:
+         if (Is_A_Local_Adr(adr))
+            {
+             Write_Global_Var(out,op,H);        /* Write before, because H */
+             Globalize_Local_Unbound_Var(adr);
+            }
+          else
+             Write_Global_Var(out,op,adr);
+         break;
+
+     case CST:
+         Write_Atom(out,prec,quote,op,UnTag_CST(word));
+         break;
+
+     case INT:
+         Write_Integer(out,op,UnTag_INT(word));
+         break;
+
+     case LST:
+         adr=UnTag_LST(word);
+         if (!op)
+            {
+             Write_String(out,"'.'(");
+             Write_Term(out,depth-1,MAX_ARG_OF_FUNCTOR_PREC,quote,FALSE,
+                        number_vars,Car(adr));
+             Write_Char(out,',');
+             Write_Term(out,depth-1,MAX_ARG_OF_FUNCTOR_PREC,quote,FALSE,
+                        number_vars,Cdr(adr));
+             Write_Char(out,')');
+            }
+          else
+            {
+             Write_Char(out,'[');
+             Write_List_Arg(out,depth,prec,quote,op,number_vars,adr);
+             Write_Char(out,']');
+            }
+         break;
+
+     case STC:
+	 adr=UnTag_STC(word);
+         Write_Structure(out,depth,prec,quote,op,number_vars,adr);
+         break;
+    }
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* WRITE_GLOBAL_VAR                                                        */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Write_Global_Var(FILE *out,Bool op,WamWord *adr)
+
+{
+ if (op && last_writing==IDENTIFIER_ATOM)
+     Lib2(fputc,' ',out);
+
+ Lib3(fprintf,out,"_%d",Global_Offset(adr));
+
+ last_writing=IDENTIFIER_ATOM;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* WRITE_ATOM                                                              */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Write_Atom(FILE *out,int prec,Bool quote,Bool op,AtomInf *atom)
+
+{
+ OperInf *oper;
+ Bool     brackets;
+ char    *p;
+
+ if (prec<MAX_PREC && op && 
+     ((oper=Lookup_Oper(atom,PREFIX))  ||
+      (oper=Lookup_Oper(atom,POSTFIX)) ||
+      (oper=Lookup_Oper(atom,INFIX))) && oper->prec>prec)
+    {
+     Write_Char(out,'(');
+     brackets=TRUE;
+    }
+  else
+     brackets=FALSE;
+
+
+ if (!quote || !atom->needs_quote)
+    {
+     if (op && last_writing==atom->type && 
+         last_writing!=SOLO_ATOM && last_writing!=OTHER_ATOM)
+         Lib2(fputc,' ',out);
+
+     Lib3(fprintf,out,"%s",atom->name);
+    }
+  else
+    {
+     Write_Char(out,'\'');
+
+     if (atom->has_quote)
+         for(p=atom->name;*p;p++)
+             if (*p=='\'')
+                {
+                 Lib2(fputc,'\'',out);
+                 Lib2(fputc,'\'',out);
+                }
+              else
+                 Lib2(fputc,*p,out);
+      else
+         Lib3(fprintf,out,"%s",atom->name);
+         
+     Write_Char(out,'\'');
+    }
+
+ if (brackets)
+     Write_Char(out,')');
+  else
+     last_writing=atom->type;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* WRITE_INTEGER                                                           */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Write_Integer(FILE *out,Bool op,int x)
+
+{
+ if (op && ((x<0  && last_writing==SYMBOL_ATOM)  ||
+            (x>=0 && last_writing==IDENTIFIER_ATOM)))
+     Lib2(fputc,' ',out);
+
+ Lib3(fprintf,out,"%d",x);
+
+ last_writing=IDENTIFIER_ATOM;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* WRITE_LIST_ARG                                                          */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Write_List_Arg(FILE *out,int depth,int prec,
+                           Bool quote,Bool op,Bool number_vars,
+                           WamWord *lst_value)
+
+{
+ WamWord  word,tag,*adr;
+ AtomInf *atom;
+
+ depth--;
+
+ Write_Term(out,depth,MAX_ARG_OF_FUNCTOR_PREC,
+            quote,op,number_vars,Car(lst_value));
+
+ if (depth==0)                       /* dots already written by Write_Term */
+     return;
+
+
+ Deref(Cdr(lst_value),word,tag,adr)
+
+
+ switch(tag)
+    {
+     case REF:
+         Write_Char(out,'|');
+         Write_Global_Var(out,op,adr);
+         break;
+
+     case CST:
+         atom=UnTag_CST(word);
+         if (atom!=atom_nil)
+            {
+             Write_Char(out,'|');
+             Write_Atom(out,prec,quote,op,atom);
+            }
+         break;
+
+     case INT:
+         Write_Char(out,'|');
+         Write_Integer(out,op,UnTag_INT(word));
+         break;
+
+     case LST:
+         adr=UnTag_LST(word);
+         Write_Char(out,',');
+         Write_List_Arg(out,depth,prec,quote,op,number_vars,adr);
+         break;
+
+     case STC:
+         adr=UnTag_STC(word);
+         Write_Char(out,'|');
+         Write_Structure(out,depth,prec,quote,op,number_vars,adr);
+         break;         
+    }
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* WRITE_STRUCTURE                                                         */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Write_Structure(FILE *out,int depth,int prec,
+                            Bool quote,Bool op,Bool number_vars,
+                            WamWord *stc_value)
+
+{
+ WamWord  word,tag,*adr;
+ WamWord  f_n    =Functor_And_Arity(stc_value);
+ AtomInf *functor=Functor(stc_value);
+ int      arity  =Arity(stc_value);
+ OperInf *oper;
+ int      nb_args_to_disp;
+ int      i,j;
+
+ depth--;
+
+ if (number_vars && f_n==dollar_var_1)
+    {
+     Deref(Arg(stc_value,0),word,tag,adr)
+     if (tag==INT)
+        {
+         word=UnTag_INT(word);
+         i=M_Mod(word,26);
+         j=M_Div(word,26);
+
+         Lib2(fputc,'A'+i,out);
+
+         if (j)
+             Lib3(fprintf,out,"%d",j);
+
+         last_writing=IDENTIFIER_ATOM;
+         return;
+	}
+    }
+
+ if (op && arity==1 && (oper=Lookup_Oper(functor,PREFIX)))
+    {
+     if (oper->prec>prec)
+         Write_Char(out,'(');
+
+     Write_Atom(out,MAX_PREC,quote,op,functor);
+     Write_Term(out,depth,oper->right,quote,op,number_vars,Arg(stc_value,0));
+
+     if (oper->prec>prec)
+         Write_Char(out,')');
+
+     return;
+    }
+
+
+ if (op && arity==1 && (oper=Lookup_Oper(functor,POSTFIX)))
+    {
+     if (oper->prec>prec)
+         Write_Char(out,'(');
+
+     Write_Term(out,depth,oper->left,quote,op,number_vars,Arg(stc_value,0));
+     Write_Atom(out,MAX_PREC,quote,op,functor);
+
+     if (oper->prec>prec)
+         Write_Char(out,')');
+
+     return;
+    }
+
+
+ if (op && arity==2 && (oper=Lookup_Oper(functor,INFIX)))
+    {
+     if (oper->prec>prec)
+         Write_Char(out,'(');
+
+     Write_Term(out,depth,oper->left,quote,op,number_vars,Arg(stc_value,0));
+
+     if (functor==atom_comma && op)
+         Write_Char(out,',');
+      else
+         Write_Atom(out,MAX_PREC,quote,op,functor);
+
+     Write_Term(out,depth,oper->right,quote,op,number_vars,Arg(stc_value,1));
+
+     if (oper->prec>prec)
+         Write_Char(out,')');
+
+     return;
+    }
+ 
+
+ if (op && f_n==curly_brackets_1)
+    {
+     Write_Char(out,'{');
+     Write_Term(out,depth,MAX_PREC,quote,op,number_vars,Arg(stc_value,0));
+     Write_Char(out,'}');
+
+     return;
+    }
+
+
+ Write_Atom(out,prec,quote,op,functor);
+ Write_Char(out,'(');
+
+ nb_args_to_disp=(arity<depth+1 || depth<0) ? arity : depth+1;
+
+ Write_Term(out,depth,MAX_ARG_OF_FUNCTOR_PREC,
+            quote,op,number_vars,Arg(stc_value,0));
+
+ for(i=1;i<nb_args_to_disp;i++)
+    {
+     Write_Char(out,',');
+     Write_Term(out,depth,MAX_ARG_OF_FUNCTOR_PREC,
+                quote,op,number_vars,Arg(stc_value,i));
+    }
+
+ if (arity!=nb_args_to_disp)
+    {
+     Write_Char(out,',');
+     Write_Atom(out,prec,quote,op,atom_dots);
+    }
+     
+ Write_Char(out,')');
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* INITALIZE_USR                                                           */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Initialize_Usr(void)
+
+{
+ AtomInf *atom;
+
+ atom_dots =Create_Atom("...");
+ atom_comma=Create_Atom(",");
+ atom      =Create_Atom("$VAR");
+
+ curly_brackets_1=Functor_Arity(atom_curly_brackets,1);
+ dollar_var_1    =Functor_Arity(atom,1);
+}
+
+
+
+
+/* end of user file */
+
+#undef  fail
+#define fail Fail_Like_Wam

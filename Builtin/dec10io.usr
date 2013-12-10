@@ -1,0 +1,386 @@
+/****************************************************************************
+Prolog to Wam Compiler                     INRIA Rocquencourt - ChLoE Project
+Version 2.1                                                Daniel Diaz - 1994
+
+file : dec10io.usr
+****************************************************************************/
+#include <string.h>
+int fclose();
+int fputc();
+int fgetc();
+
+
+/*---------------------------------*/
+/* Constants                       */
+/*---------------------------------*/
+
+#define STD_IN_OUT_NAME            "user"
+
+#define ERR_ILLEGAL_SEE_ARG        "Error: illegal see/1 argument\n"
+#define ERR_ILLEGAL_TELL_ARG       "Error: illegal tell/1 argument\n"
+#define ERR_OPEN_FILE              "Error: cannot open file %s\n"
+#define ERR_END_OF_FILE            "Error: end of file reached\n"
+
+
+
+
+/*---------------------------------*/
+/* Type Definitions                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Global Variables                */
+/*---------------------------------*/
+
+FILE *input=stdin;
+char  input_name[256]=STD_IN_OUT_NAME;
+FILE *output=stdout;
+char  output_name[256]=STD_IN_OUT_NAME;
+
+
+
+
+/*---------------------------------*/
+/* Function Prototypes             */
+/*---------------------------------*/
+
+static 
+Bool     New_Input              (void);
+
+static 
+Bool     New_Output             (void);
+
+
+
+          /*---------------------------------------------------------------*/
+          /* nl: writes a newline on output                                */
+          /*                                                               */
+          /*---------------------------------------------------------------*/
+
+#define Nl_0                                                                \
+     Lib2(fputc,'\n',output);
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* get0(X): reads a character from input                         */
+          /*                                                               */
+          /* A(0) will be unified with an INT                              */
+          /*---------------------------------------------------------------*/
+
+#define Get0_1                                                              \
+     if (feof(input))                                                       \
+        {                                                                   \
+         Lib1(printf,ERR_END_OF_FILE);                                      \
+         fail                                                               \
+        }                                                                   \
+                                                                            \
+     word=Lib1(fgetc,input);                                                \
+     clearerr(stdin);                                                       \
+     get_integer(word,0)
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* get(X): reads a non-blank character from input                */
+          /*                                                               */
+          /* A(0) will be unified with an INT                              */
+          /*---------------------------------------------------------------*/
+
+#define Get_1                                                               \
+     if (feof(input))                                                       \
+        {                                                                   \
+         Lib1(printf,ERR_END_OF_FILE);                                      \
+         fail                                                               \
+        }                                                                   \
+                                                                            \
+     word=Lib1(fgetc,input);                                                \
+     while((unsigned) word <= ' ')                                          \
+         word=Lib1(fgetc,input);                                            \
+                                                                            \
+     clearerr(stdin);                                                       \
+     get_integer(word,0)
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* skip(X): reads characters from input while != X               */
+          /*                                                               */
+          /* A(0) must be unified to an INT ro an arithmetical expression  */
+          /*---------------------------------------------------------------*/
+
+#define Skip_1                                                              \
+    {                                                                       \
+     int skip_char;                                                         \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag!=INT && !Load_Math_Expression(word,&word))                     \
+         fail                                                               \
+                                                                            \
+     skip_char=UnTag_INT(word);                                             \
+     do                                                                     \
+         if (feof(input))                                                   \
+            {                                                               \
+             Lib1(printf,ERR_END_OF_FILE);                                  \
+             fail                                                           \
+            }                                                               \
+     while(Lib1(fgetc,input)!=skip_char);                                   \
+     clearerr(stdin);                                                       \
+    }
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* put(X): writes character X on output                          */
+          /*                                                               */
+          /* A(0) must be unified to an INT ro an arithmetical expression  */
+          /*---------------------------------------------------------------*/
+
+#define Put_1                                                               \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag!=INT && !Load_Math_Expression(word,&word))                     \
+         fail                                                               \
+                                                                            \
+     Lib2(fputc,UnTag_INT(word),output);
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* tab(X): writes X spaces on output                             */
+          /*                                                               */
+          /* A(0) must be unified to an INT ro an arithmetical expression  */
+          /*---------------------------------------------------------------*/
+
+#define Tab_1                                                               \
+    {                                                                       \
+     int nb;                                                                \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag!=INT && !Load_Math_Expression(word,&word))                     \
+         fail                                                               \
+                                                                            \
+     nb=UnTag_INT(word);                                                    \
+     while(nb-->0)                                                          \
+         Lib2(fputc,' ',output);                                            \
+    }
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* readint(X): reads an integer (from input)                     */
+          /*                                                               */
+          /* A(0) will be unified with an INT                              */
+          /*---------------------------------------------------------------*/
+
+#define Readint_1                                                           \
+     Lib3(fscanf,input,"%d",&word);                                         \
+     get_integer(word,0)
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* see(X): sets the input to X                                   */
+          /*                                                               */
+          /* A(0) must be bound to an atom                                 */
+          /*---------------------------------------------------------------*/
+
+#define See_1                                                               \
+    if (!New_Input())                                                       \
+        fail
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* seen: closes the input (new input is stdin)                   */
+          /*                                                               */
+          /*---------------------------------------------------------------*/
+
+#define Seen_0                                                              \
+     if (input!=stdin)                                                      \
+        {                                                                   \
+         Lib1(fclose,input);                                                \
+         input=stdin;                                                       \
+        }                                                                   \
+     Lib2(strcpy,input_name,STD_IN_OUT_NAME);
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* seeing(X): gets the name of the input file                    */
+          /*                                                               */
+          /* A(0) will be unified with an atom                             */
+          /*---------------------------------------------------------------*/
+
+#define Seeing_1                                                            \
+    {                                                                       \
+     AtomInf *atom;                                                         \
+                                                                            \
+     atom=Create_Allocate_Atom(input_name);                                 \
+     get_constant(atom,0)                                                   \
+    }
+
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* tell(X): sets the output to X                                 */
+          /*                                                               */
+          /* A(0) must be bound to an atom                                 */
+          /*---------------------------------------------------------------*/
+
+#define Tell_1                                                              \
+    if (!New_Output())                                                      \
+        fail
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* told: closes the output (new output is stdout)                */
+          /*                                                               */
+          /*---------------------------------------------------------------*/
+
+#define Told_0                                                              \
+     if (output!=stdout)                                                    \
+        {                                                                   \
+         Lib1(fclose,output);                                               \
+         output=stdout;                                                     \
+        }                                                                   \
+     Lib2(strcpy,output_name,STD_IN_OUT_NAME);
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* telling(X): gets the name of the output file                  */
+          /*                                                               */
+          /* A(0) will be unified with an atom                             */
+          /*---------------------------------------------------------------*/
+
+#define Telling_1                                                           \
+    {                                                                       \
+     AtomInf *atom;                                                         \
+                                                                            \
+     atom=Create_Allocate_Atom(output_name);                                \
+     get_constant(atom,0)                                                   \
+    }
+
+
+
+
+/* Above this line, put your first macros (these included by pragma_c) */
+
+#undef  fail
+#define fail Fail_Like_Bool
+
+/* Below this line, put your others macros and your functions */
+
+
+/*-------------------------------------------------------------------------*/
+/* NEW_INPUT                                                               */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool New_Input(void)
+
+{
+ char    *name;
+ FILE    *f;
+ WamWord  word,tag,*adr;
+
+
+ Deref(A(0),word,tag,adr)
+ if (tag!=CST)
+    {
+     Lib1(printf,ERR_ILLEGAL_SEE_ARG);
+     return FALSE;
+    }
+
+ name=UnTag_CST(word)->name;
+ if (Lib2(strcmp,name,STD_IN_OUT_NAME)==0)
+     f=stdin;
+  else
+     if ((f=(FILE *) Lib2(fopen,name,"r"))==NULL)
+        {
+         Lib2(printf,ERR_OPEN_FILE,name);
+         return FALSE;
+        }
+
+ if (input!=stdin)
+     Lib1(fclose,input);
+
+ input=f;
+ Lib2(strcpy,input_name,name);
+
+ return TRUE;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* NEW_OUTPUT                                                              */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool New_Output(void)
+
+{
+ char    *name;
+ FILE    *f;
+ WamWord  word,tag,*adr;
+
+
+ Deref(A(0),word,tag,adr)
+ if (tag!=CST)
+    {
+     Lib1(printf,ERR_ILLEGAL_TELL_ARG);
+     return FALSE;
+    }
+
+ name=UnTag_CST(word)->name;
+ if (Lib2(strcmp,name,STD_IN_OUT_NAME)==0)
+     f=stdout;
+  else
+     if ((f=(FILE *) Lib2(fopen,name,"w"))==NULL)
+        {
+         Lib2(printf,ERR_OPEN_FILE,name);
+         return FALSE;
+        }
+
+ if (output!=stdout)
+     Lib1(fclose,output);
+
+ output=f;
+ Lib2(strcpy,output_name,name);
+
+ return TRUE;
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* INITALIZE_USR                                                           */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Initialize_Usr(void)
+
+{
+}
+
+
+
+
+/* end of user file */
+
+#undef  fail
+#define fail Fail_Like_Wam

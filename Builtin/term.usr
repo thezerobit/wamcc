@@ -1,0 +1,137 @@
+/****************************************************************************
+Prolog to Wam Compiler                     INRIA Rocquencourt - ChLoE Project
+Version 2.1                                                Daniel Diaz - 1994
+
+file : term.usr
+****************************************************************************/
+#include <string.h>
+
+/*---------------------------------*/
+/* Constants                       */
+/*---------------------------------*/
+
+#define ERR_COMPOUND_TERM_EXPECTED "\nError: compound term expected\n"
+#define ERR_ARG_NB_INCORRECT       "\nError: arg nb must be in 1-arity\n"
+
+
+
+
+/*---------------------------------*/
+/* Type Definitions                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Global Variables                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Function Prototypes             */
+/*---------------------------------*/
+
+static 
+Bool     Set_Arg                (void);
+
+
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* term_copy(T1,T2)                                              */
+          /*                                                               */
+          /* A(0) must be bound to a term                                  */
+          /* A(1) will be unified with a copy of A(0)                      */
+          /*---------------------------------------------------------------*/
+
+#define Term_Copy_2                                                         \
+    {                                                                       \
+     int size;                                                              \
+                                                                            \
+     size=Term_Size(A(0));                                                  \
+     Copy_Term(H,&A(0));                                                    \
+     word=*H;                                                               \
+     A(0)=Global_UnMove(Tag_Of(word)) ? Tag_Value(REF,H) : word;            \
+     H+=size;                                                               \
+     get_x_value(0,1)                                                       \
+    }
+
+
+
+          /*---------------------------------------------------------------*/
+          /* setarg(ArgNb,T,V)                                             */
+          /*                                                               */
+          /* A(0) must be bound to an INT in 1..arity of T                 */
+          /* A(1) must be bound to a compound term                         */
+          /* A(2) must be bound to a Prolog term                           */
+          /*---------------------------------------------------------------*/
+
+#define Setarg_3                                                            \
+     if (!Set_Arg())                                                        \
+         fail
+
+
+
+
+/* Above this line, put your first macros (these included by pragma_c) */
+
+#undef  fail
+#define fail Fail_Like_Bool
+
+/* Below this line, put your others macros and your functions */
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* SET_ARG                                                                 */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool Set_Arg(void)
+
+{
+ WamWord  word,tag,*adr;
+ AtomInf *functor;
+ int      arity;
+ WamWord *arg_adr;
+ int      i;
+
+ 
+ if ((functor=Get_Functor_Arity(A(1),&arity,&arg_adr))==NULL || arity==0)
+    {
+     Lib1(printf,ERR_COMPOUND_TERM_EXPECTED);
+     return FALSE;
+    }
+
+
+ Deref(A(0),word,tag,adr)
+ i=UnTag_INT(word);
+ if (tag!=INT || (unsigned) i>arity)
+    {
+     Lib1(printf,ERR_ARG_NB_INCORRECT);
+     return FALSE;
+    }
+
+ i--;
+
+ Deref(A(2),word,tag,adr)
+ Bind_OV((arg_adr+i),word)
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* INITIALIZE_USR                                                          */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Initialize_Usr(void)
+
+{
+}
+
+
+
+/* end of user file */
+
+#undef  fail
+#define fail Fail_Like_Wam

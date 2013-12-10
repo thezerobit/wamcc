@@ -1,0 +1,1957 @@
+\def\wamcc{\tt wamcc}
+\def\gcc  {\tt gcc}
+\def\wgcc {\tt w\_gcc}
+\def\bmf  {\tt bmf\_wamcc}
+
+
+\def\Tild {{\tt \~{ }}}
+
+\documentstyle[]{article}
+\textwidth 12.7 cm
+\textheight 21.5 cm
+\pagestyle{empty}
+
+\begin{document}
+
+\parindent 0pt
+
+~\\
+\vspace{1cm}
+
+\Large
+
+\begin{center}
+
+\begin{tabular}{||c||}
+\hline
+\\
+{\Huge  ~~{\wamcc} Prolog User's Manual~~}\\
+version 2.2 \\
+ \\
+ \\
+Daniel Diaz\\
+ ~\\
+INRIA-Rocquencourt\\
+Domaine de Voluceau\\
+78153 Le Chesnay\\
+FRANCE\\
+~\\
+{\tt Daniel.Diaz@inria.fr} \\
+\\
+July 1994 \\
+ \\
+\hline
+\end{tabular}
+
+\vspace{5cm}
+
+\large
+This manual is based on DECsystem-10 Prolog User's Manual by 
+D.L. Bowen, L. Byrd, F.C.N. Pereira, 
+L.M. Pereira, D.H.D. Warren \\
+~\\
+and on SICStus Prolog User's Manual by Mats Carlsson 
+
+\end{center}
+
+\newpage
+
+\normalsize
+
+\tableofcontents
+
+\newpage
+\setcounter{page}{1}
+\pagestyle{plain}
+
+\section{Using {\wamcc} - Modularity}
+\label{modularity}
+
+{\wamcc} is a Prolog compiler which translates Prolog to C via the WAM 
+(Warren Abstract Machine). A Prolog file will give rise to a C source
+file which will be compiled by {\gcc}. Several Prolog files can be
+compiled separately and linked by the loader to provide a Unix
+executable. A prolog file is a {\em module}. It is possible (and
+recommended) to split a big application into several little modules.
+Each module has its own independent predicate name space.  This is an
+important feature for the development of larger programs.  The module
+system of {\wamcc} Prolog is procedure based.  This  means that only
+the predicates are local to a module, whereas terms are global.  The
+module system is flat, not hierarchical, so all modules are visible to
+one another.   
+No overhead is incurred on compiled calls to predicates in other modules.
+Each predicate in the Prolog system, whether built-in or user defined,
+belongs to a module.  By default, a predicate is
+generally only visible in the module where it is defined (i.e. {\em
+private} predicate) except if this predicate has been declared as {\em
+public} (see directive {\tt :- public} below). Public predicates are visible
+in every modules. A public predicate can be {\em locally} redefined
+in any module. There is a particular module: the {\em main module}
+corresponding to the module containing the main program\footnote{The
+main module will contain the C funtion {\tt main()}.} (see directives
+{\tt :- main} below). At run-time only public predicates and private
+predicates defined in the main module will be visible under the
+top level. {\tt wamcc} also supports {\em dynamic predicates} which
+are interpreted (see section~\ref{dynamic}).
+
+
+The following directives are specially handled at compile-time:~\\
+
+\begin{description}
+
+\item [{\tt :- public Pred$_1$/Arity$_1$, ..., Pred$_n$/Arity$_n$.}]~\\
+	This directive specifies that each {\tt Pred$_i$/Arity$_i$} is
+	a public predicate.
+
+\item [{\tt :- dynamic Pred$_1$/Arity$_1$, ..., Pred$_n$/Arity$_n$.}]~\\
+	This directive specifies that each {\tt Pred$_i$/Arity$_i$} is
+	a dynamic predicate (see section~\ref{dynamic} for dynamic
+	code facilities).
+
+\item [{\tt :- main.}]
+\item [{\tt :- main(+Modules).}]
+\item [{\tt :- main(+Modules,+Stacks).}]~\\
+	This directive specifies the current module is the {\em
+	main module}. {\tt Modules} is the list of needed modules
+	(omitted if there are no other modules). {\tt Stacks} is a
+	list of {\em stack parameters} of the form {\tt
+	stack(+Name,+EnvVarName,+Size)}. {\tt Name} is the stack
+	name (see section~\ref{debug}). {\tt EnvVarName} is the name
+	of the environment variable to consult at run-time to read the
+	size of the stack. If {\tt EnvVarName} is the empty atom (i.e.
+	{\tt ''}) no environment variable will be consulted at run-time
+	for this stack. {\tt Size} is the default stack
+	size in Kbytes (if the variable {\tt EnvVarName} is not
+	defined at run-time). If there is not any definition for a
+	stack {\em stack\_name} the default environment variable is 
+	{\tt {\em stack\_name}SZ} in upper case (see also
+	section~\ref{stack-overflow}). 
+
+\end{description}
+
+Note that other directives are not executed at compile-time but they
+are compiled into special code which will be executed at
+run-time\footnote{The only exception concerns operator declarations
+{\tt op/3} which are both executed at compile-time and run-time.}. More
+precisely, at run-time, all directives of each module defined in {\tt
+Modules} are executed then the directives of the main module are
+executed. When the main module is compiled, a directive is added to
+invoke the top level (see {\tt top\_level/2} in section~\ref{control}).
+If several directives are defined in a same module, they will be
+executed in the same order as they appear in the Prolog file.\\
+
+Example:\\
+
+\begin{tt}
+\begin{tabular}{lllll}
+
+x.pl                    & ~ &  y.pl                & ~ & z.pl\\
+                        & ~ &                      & ~ & \\
+:- main([y,z]).         & ~ & :- public odd/1.     & ~ & :- public p/1.\\
+                        & ~ &                      & ~ & \\
+:- public even/1.       & ~ & odd(s(X)):- even(X). & ~ & p(X):- u(X).\\
+                        & ~ & 			   & ~ & \\
+even(0).                & ~ & :- public q/1.       & ~ & u(b). \\
+                        & ~ &                      & ~ & \\
+even(s(X)):- odd(X).    & ~ & q(X):- p(X).         & ~ & :- write(r).\\
+                        & ~ &                      & ~ & \\
+p(a).                   & ~ & :- write(q1).        & ~ & \\
+                        & ~ & :- write(q2).        & ~ & \\
+s(X):- q(X).            & ~ &                      & ~ & \\
+                        & ~ &                      & ~ & \\
+:- p(X), write(X).      & ~ & 			   & ~ & \\
+:- s(X), write(X).      & ~ & 			   & ~ & \\
+
+\end{tabular}
+\end{tt}
+
+At run-time:~\\
+
+\begin{center}
+\begin{tabular}{|l|l|l|}
+\hline
+exec directive 	& goal		      & output \\
+\hline
+1 of y		& {\tt write(q1)}     & q1\\
+2 of y		& {\tt write(q2)}     & q2\\
+ 		&		      &   \\
+1 of z		& {\tt write(r)}      & r \\
+ 		&		      &   \\
+1 of x		& {\tt p(X), write(X)}& a \\
+2 of x		& {\tt s(X), write(X)}& b \\
+3 of x		& {\tt top\_level(true,true)}  & ... \\
+\hline
+\end{tabular}
+\end{center}
+
+~\\
+
+\begin{itemize}
+
+\item The order in which directives are executed is: directives of
+{\tt y.pl}, directives of {\tt z.pl} and then directives of {\tt x.pl}.
+
+\item In the module {\tt x.pl} the public predicate {\tt p/1} has been
+redefined so the directive {\tt p(X), write(X)} will print {\tt a}.
+However, the directive {\tt s(X), write(X)} will print {\tt b} since
+in {\tt y.pl} only the public declaration of {\tt p/1} in {\tt z.pl}
+is visible.
+
+\item Under the top-level, the query {\tt | ?- p(X)} will succed
+with {\tt X=a}. The query {\tt q(X)} will succeed with {\tt X=b},
+the query {\tt u(X)} will fail since only private predicates defined
+in {\tt x.pl} can be called from the top-level. The query {\tt
+even(X)} will generate all even natural numbers through backtraking.
+
+\end{itemize}
+
+
+\section{From Prolog modules to Unix Executables}
+
+\subsection{Compiling Prolog Modules}
+
+The {\wamcc} compiler is entirely written in {\wamcc} Prolog (and
+compiled with {\wamcc}). It allows the user to compile one or several
+Prolog Modules. The  general syntax of {\wamcc} is as follows:\\
+
+
+\begin{tabbing}
+xxxxx \= \kill
+
+\> {\tt {\wamcc} [option | filename]...} \\
+\> \\
+\> Options:\\
+\> \\
+\> \begin{tabular}{ll}
+{\tt -c}          & produce a .c   file 		 \\
+{\tt -wam}        & produce a .wam file			 \\
+{\tt -fast\_math} & do not test types in math expressions\\
+{\tt -no\_inline} & do not inline any builtin predicates \\
+{\tt -dbg}        & compile for prolog debugging	 \\
+{\tt -dbg2}       & compile for prolog and wam debugging \\
+{\tt -v}          & verbose mode			 \\
+{\tt -h}          & display help			 \\
+\end{tabular}
+
+\end{tabbing}
+
+
+Remarks:\\
+
+\begin{itemize}
+
+\item if {\wamcc} is invoked without any arguments then a (classical)
+	Prolog top level is called.
+
+\item By default the compilation proceeds in C mode. 
+	When a Prolog Module {\tt prog.pl} is compiled in C mode, {\wamcc}
+	generates the following files:
+
+	\begin{description}
+
+	\item [{\tt prog.h}] a header file (variable declarations,...)
+
+	\item [{\tt prog.c}] the C source file
+
+	\item [{\tt prog.usr}] a user file. In this file the user can add his
+		own C code to interface with Prolog via {\tt pragma\_c/1}
+		inline predicate. This file is generated if it does not exist
+		otherwise it is left unchanged.
+
+	\end{description}
+
+	With the {\tt -wam} options, {\wamcc} generates a
+ 	{\tt prog.wam} file in a Prolog syntax.
+
+\item The {\tt -fast\_math} option makes it possible to generate
+	faster code since  no type checking is done for variables
+	appearing in mathemetic expressions (they are assumed to
+	contain integers).  	
+
+\item The {\tt -dbg} and {\tt -dbg2} options produce additional
+      information for debugging (see also section~\ref{debug}). 
+
+\item The {\tt -no\_inline} option is useful when debugging since it allows
+	the user to trace {\em inline predicates}. An inline predicate, is a
+	predicate which does not give rise to a classical Prolog call
+	and thus it is not visible by the debugger. The
+ 	{\tt -no\_inline} option allows the user to trace calls to
+	inline predicates as well.
+
+\item If the {\tt -v} option is not specified {\wamcc} runs silently.
+
+\item {\wamcc} returns 0 if the compilation has succeeded and 1
+	otherwise.
+
+\end{itemize}
+
+
+
+\subsection{Generating Object Files}
+
+From the C files generated by {\wamcc} it is possible to obtain an
+object file using the GNU C compiler. A shell-script {\wgcc} is provided to
+make this compilation. {\wgcc} only invokes {\tt gcc} with some necessary
+appropriate options (like {\tt -Ipath}...)\footnote{so if
+{\wamcc} is moved from one directory to another one, {\wgcc} must be
+edited to update the pathnames.}. {\wgcc} can be used as
+simple as the C compiler. The following sequence generates a file {\tt
+prog.o} from the Prolog file {\tt prog.pl}:\\
+
+{\tt ~~~\%{\wamcc} prog -fast\_math}
+
+{\tt ~~~\%{\wgcc} -c -O2 prog.c}
+
+
+
+\subsection{Linking Object Files}
+
+From one or several object files {\tt prog$_1$.o}, ..., {\tt prog$_n$.o}
+it is possible to generate an executable simply by invoking {\wgcc}
+with these files as follows:\\
+
+{\tt ~~~\%{\wgcc} -o prog prog$_1.o$ ... prog$_n.o$ -l{\wamcc}}\\
+
+The command will create the executable {\tt prog} by linking all
+object files {\tt prog[1-n].o}. A library containing the run-time and
+the built-in predicates must be provided via the option 
+{\tt -l{\em library}}. There are two libraries available
+{\tt libwamcc.a} and {\tt libwamcc\_pp.a}. The former is the standard
+library while the later allows the user to obtaind {\em profile
+information} when quiting the program.\\
+
+
+
+\subsubsection{{\tt hex2pl} and {\tt pl2hex} Utilities}
+
+At compile-time, each predicate gives rise to a C identifier which is
+the hexadecimal representation of the predicate. At linking-time, if a
+symbol is multiply defined or not defined the linker will emit a
+message involving the hexadecimal name of the predicate. Two utilities
+are provided to allow the user to translate in both directions Prolog
+atoms and hexadecimal representations:\\
+
+
+{\tt ~~~\%pl2hex {\em prolog\_name}} (Prolog to hexadecimal)\\
+
+Example: {\tt pl2hex append/3} displays {\tt X617070656E64\_3}.\\
+
+{\tt ~~~\%hex2pl {\em hexa\_name}} (hexadecimal to Prolog)\\
+
+Example: {\tt hex2pl X617070656E64\_3} will display {\tt append/3}.
+
+
+
+\subsection{Stack Overflow Messages}
+\label{stack-overflow}
+
+When one stack overflows, {\wamcc} exits with the following message:
+``Fatal Error: {\em stack\_name} stack overflow (size:{\em
+current\_size} Kb, env. variable: {\em env\_var\_name})'' where {\em
+stack\_name} is the name of the stack which has overflowed, {\em
+current\_size} is its actual size in Kbytes and {\em env\_var\_name}
+is the name of the environment variable which is consulted to define
+the size of this stack. You can then (re)define this variable 
+(e.g. with the Unix {\tt setenv} command) and reexecute the program 
+(see also directive {\tt :- main} in section~\ref{modularity}).
+
+
+
+
+\subsection{Makefile Generator - {\bmf} Utility}
+
+In order to simplify the overall compilation process, it is possible
+to define makefiles. A simple program {\bmf} (Build Make File)
+provides a way to define automatically makefiles. 
+The obtained makefile can be customized if necessary.
+The  general syntax of {\bmf} is as follows:\\
+
+\begin{tabbing}
+xxxxx \= \kill
+
+\> {\tt {\bmf} [option | filename]...} \\
+\> \\
+\> Options:\\
+\> \\
+\> \begin{tabular}{ll}
+{\tt -o file}     & choose {\tt file} as main module (default: first module)\\
+{\tt -P pflags}   & use {\tt pflags} for the {\wamcc} compiler	      \\
+{\tt -C cflags}   & use {\tt pflags} for the {\wgcc} compiler (default: -O2)	      \\
+{\tt -L cflags}   & use {\tt pflags} for the linker (default: -s)     \\
+{\tt -v}          & verbose mode                                      \\
+{\tt -h}          & display help			              \\
+\end{tabular}
+
+\end{tabbing}
+
+A {\tt filename} is a module name (possibly suffixed {\tt .pl}), 
+another object file ({\tt .o}) or an archive file ({\tt .a}).~\\
+This command creates a makefile {\tt {\em main\_module}.mk}. ~\\
+
+For instance, to create the executable {\tt x} corresponding to the
+example given in section~\ref{modularity}:~\\
+
+
+
+{\tt ~~~\%{\bmf} x y z -v} ~\\
+
+This creates the makefile {\tt x.mk}. The following command then
+(re)creates the executable {\tt x}:\\
+
+{\tt ~~~\%make -f x.mk}~\\
+
+Each makefile generated by {\bmf} can (re)create a profile executable
+whose name is {\tt {\em executable\_name}\_pp}\footnote{{\tt...\_pp}
+stands for {\em Prolog profile}.}. For instance the following command
+will create the executable {\tt x\_pp}:\\ 
+
+
+{\tt ~~~\%make -f x.mk x\_pp}~\\
+
+
+
+\section{Built-in Predicates}
+
+\subsection{Input / Output}
+
+
+
+\subsubsection{DEC-10 Prolog File Input/Output}
+
+The set of file manipulation predicates is inherited from DEC-10
+Prolog. The file {\tt user} represents the terminal.
+
+\begin{description}
+
+\item [{\tt see(+File)}]~\\ 
+	The file {\tt File} becomes the current input.
+
+\item [{\tt seeing(?File)}]~\\ 
+	{\tt File} is unified with the name of the current input.
+
+\item [{\tt seen}]~\\ 
+	Closes the current input and resets it to {\tt user}.
+
+\item [{\tt tell(+File)}]~\\ 
+	The file {\tt File} becomes the current output.
+
+\item [{\tt telling(?File)}]~\\ 
+	{\tt File} is unified with the name of the current output.
+
+\item [{\tt told}]~\\ 
+	Closes the current output and resets it to {\tt user}.
+
+\end{description}
+
+\subsubsection{Characted Input/Output}
+
+
+\begin{description}
+
+\item [{\tt nl}]~\\ 
+	A new line is started on the current output.
+
+\item [{\tt get0(?N)}]~\\ 
+	{\tt N} is the characted code of the next character read from
+	the current input. On end of file {\tt N} is -1.
+
+\item [{\tt get(?N)}]~\\ 
+	{\tt N} is the characted code of the next character that is
+	not a layout characted read from the current input. 
+
+\item [{\tt skip(+N)}]~\\ 
+	Skips just past the next character code {\tt N} from the
+	current input. {\tt N} may be an arithmetic expression.
+
+\item [{\tt put(+N)}]~\\ 
+	The character code {\tt N} is output onto the current output. 
+	{\tt N} may be an arithmetic expression.
+
+\item [{\tt tab(+N)}]~\\ 
+	{\tt N} spaces are output onto the current output.
+	{\tt N} may be an arithmetic expression.
+
+\end{description}
+
+
+
+\subsubsection{Input and Output of Terms}
+
+\begin{description}
+
+\item [{\tt read\_line(?X)}]~\\
+	Reads characters from the current input until a {\tt NEWLINE} 
+	character is read. The {\tt NEWLINE} character is discarded
+	and the result is an atom. Fails if the end of the file is
+	encountered.  
+
+\item [{\tt read\_word(?X)}]~\\
+	Skips leading separator characters and reads characters from the
+	current input until a separator character is reached (but not
+ 	read). Fails if the end of the file is encountered.  
+
+\item [{\tt read\_integer(?X)}]~\\
+	Skips leading separator characters and reads the next integer
+	from the current input. Fails if the end of the file is
+	encountered.   
+
+\item [{\tt read(?Term)}]~\\ 
+	The next term delimited by a full-stop is read from the
+	current input. When the end of the file is reached, {\tt Term}
+	is unified with the term {\tt end\_of\_file}.
+
+\item [{\tt read\_term(?Term,+Options)}]~\\ 
+	Same as {\tt read/1} with a list of options. {\tt Options} is
+	a list of :
+	\begin{description}
+
+	\item [{\tt variables(?Vars)}]~\\ 
+	{\tt Vars} is bound to a list of variables of {\tt Term}.
+
+	\item [{\tt variable\_names(?Names)}]~\\ 
+	{\tt Names} is bound to a list {\tt Name=Var} pairs where each {\tt
+	Name} is an atom indicating the name of a non-anonymous
+ 	variable in the term and {\tt Var} is the corresponding
+	variable. 
+
+	\item [{\tt singletons(?Names)}]~\\ 
+	{\tt Name} is bound to a list {\tt Name=Var} pairs, one for
+	each non-anonymous variable only appearing once in the term.
+
+	\item [{\tt syntax\_errors(+Val)}]~\\ 
+	controls what action to take on syntax errors. Possible values
+	are : {\tt dec10} (the syntax error is reported and read is
+	repeated), {\tt error} (an exception is raised), {\tt fail}
+	(the error is reported and the read fails), {\tt quiet} (the read
+	quietly fails). 
+
+	\end{description}
+
+\item [{\tt write(?Term)}]~\\ 
+	The term {\tt Term} is written onto the current output
+	according to the current operator declaration.
+
+\item [{\tt write\_canonical(?Term)}]~\\ 
+	Similar to {\tt write(Term)} but the term is written according
+	to the standard syntax. The output can be parsed by {\tt read/1}.
+
+\item [{\tt writeq(?Term)}]~\\ 
+	Similar to {\tt write(Term)} but the names of atoms ans
+	functors are quoted where necessary.
+
+\item[{\tt write\_term(+Term,+Options)}]~\\
+	Same as {\tt write/1} with a list of options ({\tt Bool} is
+	either {\tt false} or {\tt true}): 
+
+	\begin{description}
+
+	\item[{\tt quoted(Bool)}]~\\
+	If selected, functors are quoted where necessary to make the result
+	acceptable as input to {\tt read/1}. 
+
+	\item[{\tt ignore\_ops(+Bool)}]~\\
+	If selected, {\tt Term} is written in standard parenthesized notation
+	instead of using operators.
+
+	\item[{\tt numbervars(+Bool)}]~\\
+	If selected, occurrences of {\tt '\$VAR'(I)} where {\tt I} is an
+	integer $>= 0$ are written as 
+	({\tt A} + ({\tt I} mod 26))({\tt I}/26). For {\tt I=0,...} you
+	get the variable names A,B,..., Z, A1, B1, etc. 	
+
+	\item[{\tt max\_depth(N)}]~\\
+	Depth limit on printing.  {\tt N} is an integer.  -1 (the
+	default) means 	no limit.
+
+	\end{description}
+
+
+\item [{\tt format(+Format,+Arguments)}]~\\ 
+	Print {\tt Arguments} onto the current output according to format
+	{\tt Format}.  {\tt Format} is a list of formatting characters. 
+	{\tt format/2} and {\tt format/3} is a Prolog interface to the
+	C {\tt stdio} function {\tt printf()}.  It is due to Quintus/Sicstus
+	Prolog. \\
+	{\tt Arguments} is a list of items to be printed.  If there is
+	only one item it may be supplied as an atom.  If there are no
+	items then an empty list should be supplied.
+	
+	The default action on a format character is to print it.  
+	The character \Tild and {\tt \%} introduce a control sequence.  
+	To print a \Tild or a {\tt \%} repeat it.
+
+	The general format of a control sequence is {\tt \Tild NC}.  The
+	character {\tt C} determines the type of the control sequence.
+	{\tt N} is an optional numeric argument.  An alternative form
+	of {\tt N} is {\tt *}.  {\tt *} implies that the next argument
+	in {\tt Arguments} should be used as a numeric argument in the
+	control sequence.
+
+	The following control sequences are available.
+	
+	\begin{description}
+
+	\item [{\tt \Tild a}]
+	The argument is an atom.  The atom is printed without quoting.
+	
+	\item [{\tt \Tild Nc}]
+	 The argument is a number that will be interpreted as
+	a character code.  {\tt N} defaults to one and is interpreted as the
+	number of times to print the character. 
+	
+	\item [{\tt \Tild Nd}]
+	The argument is an integer.  {\tt N} is interpreted as
+	the number of digits after the decimal point.  If {\tt N} is 0 or
+	missing, no decimal point will be printed.
+	
+	\item [{\tt \Tild ND}]
+	The argument is an integer.  Identical to {\tt \Tild Nd} except
+	that {\tt ,} will separate groups of three 
+	digits to the left of the decimal point. 
+
+	\item [{\tt \Tild Nr}]
+	The argument is an integer.  {\tt N} is interpreted as a
+	radix.  {\tt N} should be $>= 2$ and $<= 36$.  If {\tt N} is
+	missing the radix defaults to 8.  The letters {\tt a-z} will
+	denote digits larger than 9.
+	
+	\item [{\tt \Tild NR}]
+	The argument is an integer.  Identical to
+	{\tt \Tild Nr} except that the letters {\tt A-Z} will denote digits
+	larger than 9. 
+	
+	\item [{\tt \Tild Ns}]
+	The argument is a list of character codes.  Exactly {\tt N}
+	characters will be printed.  {\tt N} defaults to the length of
+	the string. 
+	
+	\item [{\tt \Tild i}]
+	The argument, which may be of any type, is ignored.
+	
+	\item [{\tt \Tild k}]
+	The argument may be of any type.  The argument will
+	be passed to {\tt write\_canonical/1}.
+	
+	\item [{\tt \Tild q}]
+	The argument may be of any type.  The argument will be
+	passed to {\tt writeq/1}.
+	
+	\item [{\tt \Tild w}]
+	The argument may be of any type.  The argument will be passed
+	to {\tt write/1}.
+	
+	\item [{\tt \Tild \Tild}]
+	Takes no argument.  Prints {\tt \Tild }.
+	
+	\item [{\tt \Tild Nn}]
+	Takes no argument.  Prints {\tt N} newlines.  {\tt N}
+	defaults to 1.
+
+	\item [{\tt \Tild ?}]
+	The argument is an atom and is considered as the current format 
+	(indirection). Example: \\
+	{\tt format("month:~\Tild ?,~year:~\Tild?",['\Tild
+      	a',january,'\Tild d',1994]).} \\  
+	will print: {\tt month:~january, year:~1994}.
+
+	\item [{\tt \%F}]
+	{\tt F} is a C {\tt printf} format for integers and atoms (i.e.
+	C integer and C strings). \\
+	Example: {\tt format("\%02d~\%3.3s~\%4d",[1,january,1994]).} \\
+	will print: {\tt 01~jan~1994}.
+
+	\end{description}
+
+\item [{\tt formata(+Format,+Arguments)}]~\\ 
+	Like {\tt format/2} but {\tt Format} is an atom and {\tt
+	Arguments} must be a list (faster than {\tt format/2}).
+
+
+\item [{\tt pp\_clause(+Clause)}]~\\
+	Pretty-prints the clause {\tt Clause} onto the current output
+	(used by {\tt listing/1}).
+
+\item [{\tt pp\_clause(+Head,?Body)}]~\\
+	Like {\tt pp\_clause((Head~:-~Body))}.
+
+\end{description}
+
+
+
+\subsection{Arithmetic}
+
+Arithmetic is performed by built-in predicates which take as argument
+arithmetic expressions and evaluate them. An arithmetic expression is
+a term built from the numbers, variables and functors that represent
+arithmetic functions. When an arithmetic expression is evaluated, each
+variable must be bound to an arithmetic expression. However, if you
+use the option {\tt -fast\_math} then the compiler assumes that each
+variable will be bound to an integer and does not check its type.
+
+The range of integers are {\verb@[-2^28,+2^28-1]@}. Floats are not
+supported in this version. \\
+
+
+\begin{tabular}{ll}
+
+{\tt +(X)}	& {\tt X} \\
+{\tt -X}	& negative of {\tt X} \\
+{\tt X+Y}	& sum of {\tt X} and {\tt Y} \\
+{\tt X-Y}	& difference of {\tt X} and {\tt Y} \\
+{\tt X*Y}	& product of {\tt X} and {\tt Y} \\
+{\tt X//Y}	& integer quotient of {\tt X} and {\tt Y} \\
+{\tt X mod Y} 	& integer remainder after dividing {\tt X} by {\tt Y} \\
+{\verb@X/\Y@} 	& bitwise and of {\tt X} and {\tt Y}\\
+{\verb@X\/Y@}	& bitwise or of {\tt X} and {\tt Y} \\
+{\verb@X^Y@}	& bitwise exclusive or of {\tt X} and {\tt Y} \\
+{\verb@\(X)@}	& bitwise not of {\tt X} \\
+{\verb@X<<Y@} 	& {\tt X} shifted left by {\tt Y} places \\
+{\verb@X>>Y@} 	& {\tt X} shifted right by {\tt Y} places \\
+{\tt [X]}	& a list of one number {\tt X} evaluates to {\tt X}\\
+
+\end{tabular}
+
+Arithmetic expressions are just Prolog terms. If you want one
+evaluated you must pass it as an argument to one of the following
+built-in (where {\tt X} and {\tt Y} stand for arithmetic expressions
+and {\tt Z} for some term). 
+
+
+\begin{description}
+
+\item [{\tt Z is X}] ({\em inline predicate})~\\
+	{\tt X} is evaluated and the value is unified with {\tt Z}.
+
+\item [{\verb@X=:=Y@}] ({\em inline predicate})~\\
+	{\tt X} is equal to {\tt Y}.
+
+\item [{\verb@X=$\backslash$=Y@}] ({\em inline predicate})~\\
+	 {\tt X} is not equal to {\tt Y}.
+
+\item [{\verb@X<Y@}] ({\em inline predicate})~\\
+	{\tt X} is less than {\tt Y}.
+
+\item [{\verb@X=<Y@}] ({\em inline predicate})~\\
+	{\tt X} is less than or equal to {\tt Y}.
+
+\item [{\verb@X>Y@}] ({\em inline predicate})~\\
+	{\tt X} is greater than {\tt Y}.
+
+\item [{\verb@X>=Y@}] ({\em inline predicate})~\\
+	{\tt X} is greater than or equal to {\tt Y}.
+
+\end{description}
+
+
+
+
+\subsection{Term Management}
+
+\subsubsection{Term Comparison}
+\label{term-comparison}
+
+The predicates make references to a {\em standard total ordering} which
+is as follows:
+
+\begin{itemize}
+
+\item Variables in standard order (roughly oldest first).
+
+\item Integers in numeric order.
+
+\item Atoms in alphabetic order.
+
+\item Compound term, ordered first by the arity, then by
+the name of the principal functor, then by the arguments (in
+left-to-right order). Recall that lists are equivalent to compound
+terms with principal {\tt ./2}.
+
+
+\end{itemize}
+
+For the following predicates {\tt X} and {\tt Y} are terms.\\ 
+
+\begin{description}
+
+\item [{\tt compare(?Op,?X,?Y)}] ({\em inline predicate})~\\
+	Compares {\tt X} and {\tt Y} and unifies {\tt Op} with
+	{\tt =}, {\verb@<@} or {\verb@>@}.
+
+\item [{\tt X==Y}] ({\em inline predicate})~\\
+	 {\tt X} is literally equal to {\tt Y}.
+
+\item [{\verb@X$\backslash$==Y@}] ({\em inline predicate})~\\
+	{\tt X} is not literally equal to {\tt Y}.
+
+\item [{\verb!X@<Y!}] ({\em inline predicate})~\\
+	{\tt X} is literally less than {\tt Y}.
+
+\item [{\verb!X@=<Y!}] ({\em inline predicate})~\\
+	{\tt X} is literally less than or equal to {\tt Y}.
+
+\item [{\verb!X@>Y!}] ({\em inline predicate})~\\
+	{\tt X} is literally greater than {\tt Y}.
+
+\item [{\verb!X@>=Y!}] ({\em inline predicate})~\\
+	{\tt X} is literally greater than or equal to {\tt Y}.
+
+\end{description}
+
+
+Some further predicates involving comparison of terms are:
+
+\begin{description}
+
+\item [{\tt sort(+L1,?L2)}]~\\
+	The elements of the list {\tt L1} are sorted into the total
+	orderer and any identical elements are merged yielding the
+	list {\tt L2} (complexity: $O(N~log~N)$ where $N$ is the length
+	of {\tt L1}).
+
+\item [{\tt keysort(+L1,?L2)}]~\\
+	The list {\tt L1} must consist of items of the form {\tt
+	Key-Value}. These items are sorted into order according to the
+	value of {\tt Key} yielding the list {\tt L2}. No merging
+	takes place and this predicate is stable (if {\tt K-A} occurs
+	before {\tt K-B} then {\tt K-A} will take place before
+	{\tt K-B} in the output). (complexity: $O(N~log~N)$ where $N$
+	is the length of {\tt L1}).
+
+\end{description}
+
+
+
+
+\subsubsection{Constant Processing}
+
+There are 3 ways of representing character-string data:
+
+\begin{itemize}
+
+\item Atoms (e.g. {\tt 'Hello World'}). Atoms are stored in the symbol
+	table (a hash-table).
+
+\item Lists of one-character atoms (e.g. {\tt [H,e,l,l,o,'~',w,o,r,l,d]}).
+
+\item Strings (e.g. ``Hello World'') where a string is a list of
+	numeric codes 
+	(e.g. {\tt [72,101,108,108,111,32,87,111,114,108,100]}).
+
+\end{itemize}
+
+
+\begin{description}
+
+\item [{\tt atom\_length(+Atom,?Length)}]~\\
+	Length of {\tt Atom} is {\tt Length}.
+
+\item [{\tt atom\_concat(?Atom1,?Atom2,+Atom3)}]
+\item [{\tt atom\_concat(+Atom1,+Atom2,-Atom3)}]~\\
+	Concatenes {\tt Atom1} and {\tt Atom2} to give {\tt Atom3}.
+
+\item [{\tt sub\_atom(+Atom,?Start,?Length,?Atom1)}]~\\
+	The subatom of {\tt Atom} beginning at the {\tt Start}{\em th}
+	character and {\tt Length} characters long is {\tt Atom1}.
+
+\item [{\tt char\_code(+Char,?Code)}]
+\item [{\tt char\_code(?Char,+Code)}]~\\
+	Unifies the character {\tt Char} with its the character code 
+	{\tt Code}.
+
+\item [{\tt chars\_codes(+Chars,?Codes)}]
+\item [{\tt chars\_codes(?Chars,+Codes)}]~\\
+	Interconverts the list of chars {\tt Chars} with the list of
+	corresponding character codes {\tt Codes}.
+
+\item [{\tt atom\_codes(+Atom,?Codes)}]
+\item [{\tt atom\_codes(?Atom,+Codes)}]~\\
+	Interconverts {\tt Atom} with the corresponding list of
+	character codes {\tt Codes}.
+
+\item [{\tt atom\_chars(+Atom,?Chars)}]
+\item [{\tt atom\_chars(?Atom,+Chars)}]~\\
+	Interconverts {\tt Atom} with the corresponding list of
+	characters {\tt Chars}.
+
+\item [{\tt number\_atom(+Number,?Atom)}]
+\item [{\tt number\_atom(?Number,+Atom)}]~\\
+	Interconverts {\tt Atom} with the corresponding number {\tt Number}.
+
+\item [{\tt number\_codes(+Number,?Codes)}]
+\item [{\tt number\_codes(?Number,+Codes)}]~\\
+	Interconverts {\tt Number} with the corresponding list of
+	character codes {\tt Codes}.
+
+\item [{\tt number\_chars(+Number,?Chars)}]
+\item [{\tt number\_chars(?Number,+Chars)}]~\\
+	Interconverts {\tt Number} with the corresponding list of
+	characters {\tt Chars}.
+
+\item [{\tt name(+X,?Codes)}]
+\item [{\tt name(?X,+Codes)}]~\\
+	If {\tt X} is an atom,  equivalent to {\tt atom\_codes(X,Codes)}.
+	If {\tt X} is a number, equivalent to {\tt number\_codes(X,Codes)}.
+	If {\tt X} is uninstantiated, if {\tt Codes} can be
+	interpreted as a number {\tt X} is unified with that number
+	otherwise with the atom whose name corresponds to {\tt Codes}.
+
+
+\end{description}
+
+
+
+
+
+
+\subsubsection{Term Processing}
+
+\begin{description}
+
+\item [{\tt ?Term1=?Term2}] ({\em inline predicate})~\\
+	Unifies {\tt Term1} and {\tt Term2}.
+
+\item [{\tt functor(+Term,?Name,?Arity)}]
+\item [{\tt functor(?Term,+Name,+Arity)}] ({\em inline predicate})~\\
+	The principal functor of term {\tt Term} has name {\tt Name}
+	and arity {\tt Arity}, where {\tt Name} is either an atom or,
+	provided {\tt Arity} is 0, an integer.  Initially, either {\tt Term}
+	must be instantiated, or {\tt Name} and {\tt Arity} must be
+	instantiated to, respectively, either an atom and an integer in
+	[0..255] or an atomic term and 0.  In the case where {\tt Term} is
+	initially uninstantiated, the result of the call is to instantiate
+	{\tt Term} to the most general term having the principal functor
+	indicated.
+
+\item [{\tt arg(+ArgNo,+Term,?Arg)}] ({\em inline predicate})~\\
+	Initially, {\tt ArgNo} must be instantiated to a positive integer and
+	{\tt Term} to a compound term.  The result of the call is to unify
+	{\tt Arg} with the argument {\tt ArgNo} of term {\tt Term}.  The
+	arguments are numbered from 1 upwards.
+
+\item [{\tt +Term =.. ?List}]
+\item [{\tt ?Term =.. +List}] ({\em inline predicate})~\\
+	{\tt List} is a list whose head is the atom corresponding to
+	the principal 
+	functor of {\tt Term}, and whose tail is a list of the arguments of
+	{\tt Term}.
+	If {\tt Term} is uninstantiated, then {\tt List} must be instantiated
+	either to a list of determinate length whose head is an atom, or to a
+	list of length 1 whose head is a number.  Note that this predicate is
+	not strictly necessary, since its functionality can be provided by
+	{\tt arg/3} and {\tt functor/3}, and using the latter two is usually
+	more efficient.
+
+\item [{\tt copy\_term(?Term,?CopyOfTerm)}]~\\
+	{\tt CopyOfTerm} is a renaming of {\tt Term}, such that brand new
+	variables have been substituted for all variables in {\tt Term}.
+
+\item [{\tt setarg(+ArgNo,+CompoundTerm,?NewArg)}]~\\
+	Replaces destructively argument {\tt ArgNo} in {\tt CompoundTerm}
+	with {\tt NewArg} and undoes it on backtracking. This should
+	only used if there is no further use of the ``old'' value of
+	the replaced argument. 
+
+\item [{\tt numbervars(?Term,+N,?M)}]~\\
+	Unifies each of the variables in term {\tt Term} with a
+	special term {\tt '\$VAR'(i)} where {\tt i} ranges
+	from {\tt N} to {\tt M}-1 (see {\tt write/1} or {\tt
+	writeq/1}). This predicate is used by  {\tt listing/1}.
+
+
+\end{description}
+
+
+
+
+
+\subsection{Test Predicates}
+
+The following test the type of the term {\tt X}:
+
+\begin{description}
+\item [{\tt var(?X)}] ({\em inline predicate})~\\
+	Tests whether {\tt X} is currently uninstantiated ({\tt var}
+	is short for variable).  An uninstantiated variable is one which has
+	not been bound to anything, except possibly another
+	uninstantiated variable. 	
+
+\item [{\tt nonvar(?X)}] ({\em inline predicate})~\\
+	Tests whether {\tt X} is currently instantiated.  This is the
+	opposite of {\tt var/1}.
+
+\item [{\tt atom(?X)}] ({\em inline predicate})~\\
+	Checks that {\tt X} is currently instantiated to an atom (i.e. a
+	non-variable term of arity 0, other than a number). 
+
+\item [{\tt integer(?X)}] ({\em inline predicate})~\\
+	Checks that {\tt X} is currently instantiated to an integer.  
+
+\item [{\tt number(?X)}] ({\em inline predicate})~\\
+	Checks that {\tt X} is currently instantiated to a number
+	(i.e. an integer).  
+
+\item [{\tt atomic(?X)}] ({\em inline predicate})~\\
+	Checks that {\tt X} is currently instantiated to an atom or number.
+
+\item [{\tt compound(?X)}] ({\em inline predicate})~\\
+	Checks that {\tt X} is currently instantiated to a term of arity $>$
+	0 i.e. a list or a structure.
+
+\item [{\tt callable(?X)}] ({\em inline predicate})~\\
+	Checks that {\tt X} is currently instantiated to a callable
+	term (i.e. an atom or a compound term).
+	
+
+\end{description}
+
+
+
+\subsection{Control}
+\label{control}
+
+
+\begin{description}
+
+\item [{\tt +P , +Q}]~\\
+	Prove {\tt P} and if it succeeds, then prove {\tt Q}.
+
+\item [{\tt +P ; +Q}]~\\
+	Prove {\tt P} or if it fails (or if the continuation fails),
+	prove {\tt Q} instead  of {\tt P}.
+
+\item [{\tt !}]~\\
+	The effect of the cut symbol is as follows.  When first
+	encountered as a goal, cut succeeds immediately.  If backtracking
+	should later return to the cut, the effect is to fail the parent
+	goal, i.e. that goal which matched the head of the clause containing
+	the cut, and caused the clause to be activated. 
+
+\item [{\tt $\backslash$+ +P}]~\\
+	If the goal {\tt P} has a solution, fail, otherwise succeed.
+	This is not real negation (``{\tt P} is false''), but a kind of
+	pseudo-negation meaning ``{\tt P} is not provable''.  
+
+\item [{\tt +P -> +Q ; +R}]~\\
+	Analogous to ``if {\tt P} then {\tt Q} else {\tt R}''
+	This form of if-then-else only explores the first solution to
+	the goal {\tt P}. 
+
+\item [{\tt +P -> +Q}]~\\
+	Equivalent to {\tt (P -> Q ; fail)}.
+
+
+\item [{\tt otherwise}]
+\item [{\tt true}]~\\
+	These always succeed.
+
+\item [{\tt false}]
+\item [{\tt fail}]~\\
+	These always fail.
+
+\item [{\tt repeat}]~\\
+	Generates an infinite sequence of backtracking choices.
+
+\item [{\tt for(I,A,B)}]~\\
+	Generates, on backtracking, values for {\tt I} ranging from
+	{\tt A} to {\tt B}.
+
+\item [{\tt call(+Term)}]~\\
+	{\tt Term} must be instantiated to a term (which would be
+	acceptable as the body of a clause). The goal {\tt call(Term)} is
+	then  executed exactly as if that term appeared textually in
+	its place, except that any cut ({\tt !}) occurring in {\tt
+	Term} only cuts alternatives in the execution of {\tt Term}. 
+
+\item [{\tt halt(+Status)}]
+\item [{\tt halt}]~\\
+	Terminates the Prolog process with the status {\tt Status}.
+	{\tt halt/0} is a shorthand for {\tt halt(0)}.
+
+\item [{\tt halt\_or\_else(+Program,+Status)}]
+\item [{\tt halt\_or\_else(+Program)}]~\\
+	Same as {\tt halt(Status)} if there is a top level else
+	same as {\tt call(Program)}.
+
+
+\item [{\tt abort}]~\\
+	Stops the current goal and returns under the top level
+	if exists or exits with the status 1.
+
+\item [{\tt catch(+Goal,?Catcher,+Recovery)}]
+\item [{\tt throw(?Ball)}]~\\
+	{\tt catch/3} calls {\tt Goal}.  If this succeeds or 
+	fails, so does the call to {\tt catch/3}.  If however, during
+	the execution of {\tt Goal}, there is a call to 
+	{\tt throw(Ball)} (i.e. an exception is raised), 
+	then {\tt Ball} is copied and the stack is
+	unwound back to the call to {\tt catch/3}, whereupon the copy
+	of {\tt Ball} is unified with {\tt Catcher}.  If this
+	unification succeeds, then {\tt catch/3} calls the goal 
+	{\tt Recovery} (a handler) in order to determine the success
+	or failure of {\tt catch/3}.  Otherwise, the stack keeps
+	unwinding, looking for an earlier invocation of {\tt catch/3}. 
+
+
+\end{description}
+
+
+\subsection{List Processing}
+
+The following predicates are inspired from the {\tt lists} library of
+SICStus Prolog. The following predicates are available:\\
+
+\begin{description}
+
+\item [{\tt append(?Prefix,?Suffix,?Combined)}]~\\
+	is true when {\tt Combined} is the combined list of the elements in
+	{\tt Prefix} followed by the elements in {\tt Suffix}.  It can
+	be used to form {\tt Combined} or it can be used to find {\tt Prefix}
+	and/or {\tt Suffix} from a given {\tt Combined}.
+
+\item [{\tt member(?Element,?List)}]~\\
+	is true when {\tt Element} is a member of {\tt List}.  It may
+	be used to test for membership in a list, but it can also be used to
+	enumerate all the elements in {\tt List}.
+
+\item [{\tt memberchk(+Element,+List)}]~\\
+	is true when {\tt Element} is a member of {\tt List}, but
+	{\tt memberchk/2} only succeeds once and can therefore not be
+	used to enumerate the elements in {\tt List}.
+
+\item [{\tt reverse(?List,?Reversed)}]~\\
+	is true when {\tt Reversed} has the same elements as
+	{\tt List} but in a reversed order.
+
+\item [{\tt delete(+List,+Element,?Residue)}]~\\
+	is true when {\tt Residue} is the result of removing all
+	identical occurrences of {\tt Element} in {\tt List}.
+
+\item [{\tt select(?Element,?List,?List2)}]~\\
+	is true when the result of removing an occurrence of
+	{\tt Element} in {\tt List} is {\tt List2}.	
+
+\item [{\tt permutation(?List,?Perm)}]~\\
+	is true when {\tt Perm} is a permutation of {\tt List}.
+
+\item [{\tt prefix(?Prefix,?List)}]~\\
+	is true when {\tt Prefix} is a prefix of {\tt List}. 
+
+\item [{\tt suffix(?Suffix,?List)}]~\\
+	is true when {\tt Suffix} is a suffix of {\tt List}.
+
+\item [{\tt sublist(?Sub,?List)}]~\\
+	is true when {\tt Sub} contains some of the elements of {\tt List}.
+
+\item [{\tt last(?List,?Last)}]~\\
+	is true when {\tt Last} is the last element in {\tt List}.
+
+\item [{\tt length(?List,?Length)}]~\\
+	If {\tt List} is instantiated to a list of determinate length,
+	then {\tt Length} will be unified with this length.
+	If {\tt List} is of indeterminate length and {\tt Length} is
+	instantiated to an integer, then {\tt List} will be unified
+	with a list of length {\tt Length}.  The list elements are unique
+	variables.  
+	If {\tt Length} is unbound then {\tt Length} will be unified
+	with all possible lengths of {\tt List}. 
+
+\item [{\tt nth(?N,?List,?Element)}]~\\
+	{\tt nth/3} is true when {\tt Element} is the {\tt N}th
+	element of {\tt List}. The first element is number 1.
+
+\item [{\tt max\_list(+ListOfNumbers,?Max)}]~\\
+	is true when {\tt Max} is the largest of the elements in
+	{\tt ListOfNumbers}. 
+
+\item [{\tt min\_list(+ListOfNumbers,?Min)}]~\\
+	is true when {\tt Min} is the smallest of the numbers in the list
+	{\tt ListOfNumbers}.
+
+\item [{\tt sum\_list(+ListOfNumbers,?Sum)}]~\\
+	is true when {\tt Sum} is the result of adding the
+	{\tt ListOfNumbers} together.
+
+
+\end{description}
+
+\subsection{Operators}
+
+\begin{description}
+
+\item [{\tt op(+Precedence,+Type,+Name)}]~\\
+	Declares the atom {\tt Name} to be an operator of the stated
+	{\tt Type} and {\tt Precedence}.
+	{\tt Name} may also be a list of atoms in which case all of them are
+	declared to be operators.  If {\tt Precedence} is 0 then the
+	operator properties of {\tt Name} (if any) are cancelled.
+
+\end{description}
+
+
+
+
+\subsection{Modification of the Program}
+\label{dynamic}
+
+
+{\wamcc} allows for dynamic code, i.e. code which can be considered as
+data. This allows the user to add and retract clauses dynamically and
+to consult programs which is very useful when debugging since this
+avoid to recompile the code. A {\em dynamic predicate} is either a
+predicate which has been declared with the directive {\tt :- dynamic}
+or a predicate whose first clause has been dynamically created ({\em
+asserted}). In this version dynamic code is always public (can be seen
+by any module). Note that a {\em static predicate} (i.e. compiled
+predicate) cannot be redefined by a dynamic predicate.
+
+
+For the predicates defined below, the argument {\tt Head} must be
+instantiated to an atom or a compound term.  The argument {\tt Clause}
+must be instantiated either to a term {\tt Head~:-~Body}
+or, if the body part is empty, to {\tt Head}.  An empty body part is
+represented as {\tt true}. 
+
+\begin{description}
+
+\item [{\tt asserta(+Clause)}]~\\
+	The current instance of {\tt Clause} is interpreted as a
+	clause and is added to the current interpreted program as the
+	first clause.  The
+	predicate concerned must be currently be dynamic or undefined.
+	Any uninstantiated variables in the  {\tt Clause} will be replaced by
+	new private variables. 
+
+\item [{\tt assertz(+Clause)}]~\\
+	Like {\tt asserta/2}, except that the new clause becomes the
+	last clause for the predicate concerned.
+
+\item [{\tt clause(+Head,?Body)}]~\\
+	The clause {\tt Head~:-~Body} exists in the current
+	interpreted program.  The predicate concerned must currently
+	be dynamic.  {\tt clause/2} may be used in a non-determinate fashion,
+	i.e. it will successively find clauses matching the
+	argument through backtracking. 
+
+\item [{\tt retract(+Clause)}]~\\
+	The first clause in the current interpreted program that matches
+	{\tt Clause} is erased.  The predicate concerned must currently be
+	dynamic.  {\tt retract/1} may be used in a non-determinate fashion,
+	i.e. it will successively retract clauses matching the
+	argument through backtracking. 
+
+\item [{\tt reinit\_predicate(+Name/+Arity)}]~\\
+	Erase all clauses of the predicate specified by {\tt Name/Arity}.
+	The predicate definition is retained. 
+
+
+\item [{\tt abolish(+Name/+Arity)}]~\\
+	Erase all clauses of the predicate specified by {\tt Name/Arity}.
+	The predicate definition is also erased.
+
+\item [{\tt listing(+Name/+Arity)}]~\\
+	Lists the interpreted predicate(s) specified by {\tt Name/Arity}
+	Any variables in the listed clauses are internally bound to ground
+	terms before printing.
+
+\item [{\tt consult(+Files)}]~\\
+	Consults source files. {\tt Files} is either the name of a file
+	or a list of filenames. Note that it is possible to call
+	{\tt consult(user)} and then enter a clauses directly on the
+	terminal (ending with \verb@^D@).
+
+	When a directive is read it is immediately executed.  Any predicate
+	defined in the files erases any clauses for that predicate already
+	present in the interpreter. Recall that a static predicate
+	cannot be redefined by an interpreted predicate.
+
+\item [{\tt [File|Files]}]~\\
+	shorthand for {\tt consult([File|Files])}.
+
+\end{description}
+
+
+\subsection{All Solutions}
+
+When there are many solutions to a problem, and when all those solutions
+are required to be collected together, this can be achieved by repeatedly
+backtracking and gradually building up a list of the solutions.  The
+following built-in predicates are provided to automate this process.
+
+\begin{description}
+
+\item [{\tt setof(?Template,+Goal,?Set)}]~\\
+	Read this as ``{\tt Set} is the set of all instances of
+	{\tt Template} such that {\tt Goal} is satisfied, where that set is
+	non-empty''.  The term {\tt Goal} specifies a goal or goals as
+	in {\tt call(Goal)}.  {\tt Set} is a set of terms represented
+	as a list of those terms, without duplicates, in the standard
+	order for terms (see section~\ref{term-comparison}).  If there are no
+	instances of {\tt Template} such that {\tt Goal} is satisfied
+	then the predicate fails.
+
+	The variables appearing in the term {\tt Template} should not
+	appear anywhere else in the clause except within the term {\tt Goal}.
+	Obviously, the set to be enumerated should be finite, and should be
+	enumerable by Prolog in finite time.  It is possible for the provable
+	instances to contain variables, but in this case the list
+	{\tt Set} will only provide an imperfect representation of
+	what is in reality an infinite set.
+
+	If there are uninstantiated variables in {\tt Goal} which do not also
+	appear in {\tt Template}, then a call to this built-in predicate may
+	backtrack, generating alternative values for {\tt Set}
+	corresponding to different instantiations of the free
+	variables of {\tt Goal}.  (It is to cater for such usage that
+	the set {\tt Set} is constrained to be non-empty.)  Two
+	instantiations are different iff no renaming of variables can make
+	them literally identical.
+
+	Variables occurring in {\tt Goal} will not be treated as free
+	if they are explicitly bound within {\tt Goal} by an existential
+	quantifier.  An existential quantification is written \verb@Y^Q@
+	meaning ``there exists a {\tt Y} such that {\tt Q} is true'',
+	where {\tt Y} is some Prolog variable.  
+
+
+\item [{\tt bagof(?Template,+Goal,?Bag)}]~\\
+	This is exactly the same as {\tt setof/3} except that the list
+	(or alternative lists) returned will not be ordered, and may contain
+	duplicates.  The effect of this relaxation is to save a call to
+	{\tt sort/2}, which is invoked by {\tt setof/3} to return an ordered
+	list.  
+
+\item [{\tt findall(?Template,+Goal,?Bag)}]~\\
+	{\tt Bag} is a list of instances of {\tt Template} in all
+	proofs of {\tt Goal} found by Prolog.  The order of the list
+	corresponds to the order in which the proofs are found.  The list may
+	be empty and all variables are taken as being existentially
+	quantified.  This means that each invocation of {\tt findall/3}
+	succeeds {\em exactly once}, and that no variables in {\tt Goal} get
+	bound.  Avoiding the management of universally quantified variables
+	can save considerable time and space. 
+
+
+\item [{\tt findall(?Template,+Goal,?Bag,?Remainder)}]~\\
+	Same as {\tt findall/3}, except {\tt Bag} is the list of solution
+	instances appended to {\tt Remainder}, which is typically unbound.
+
+\end{description}
+
+
+\subsection{Global Variables}
+
+{\wamcc} provides a simple and powerful way to assign and read global
+variables. There are 3 kinds of objects which can be associated to a
+global variable: 
+
+\begin{itemize}
+
+\item a copy of a term,
+
+\item a link to a term,
+
+\item an array of objects.
+
+\end{itemize}
+
+The initial value of a global variable is the integer 0.
+A global variable is referenced by a name (i.e. name = an atom)
+possibly indiced if it is an array (i.e. name = a compound term). In
+the following, {\tt GVarName} represents such a reference to a global
+variable and its syntax is as follows: 
+
+\begin{center}
+\begin{tt}
+\begin{tabular}{ll}
+
+GVarName~::=    & atom \\
+		& atom(Index,...,Index) \\
+		& \\
+Index~~~~::=	& integer \\
+		& GVarName 
+\end{tabular}
+\end{tt}
+\end{center}
+
+When a {\tt GVarName} is used as an index, the value of this variable
+must be an integer. Indexes range from 0 to {\tt Size-1} if the array
+has {\tt Size} elements.
+
+The space necessary for copies and arrays are allocated dynamically
+and recovered as soon as possible. For instance, when an atom is
+associated to a global variable whose current value is an array, the
+space for this array is recovered (unless if the assignment must be
+undone when backtracking occurs, see below).
+
+\begin{description}
+
+\item [{\tt g\_assign(+GVarName,+Term)}] ({\em inline predicate})~\\
+	Associates a copy of the term {\tt Term} to {\tt GVarName}.
+	This assignment is not undone when backtracking occurs.
+	See below about array (re)definitions.
+
+\item [{\tt g\_assignb(+GVarName,+Term)}] ({\em inline predicate})~\\
+	Same as {\tt g\_assign/2} but the assignment is undone when
+	backtraking occurs.
+	See below about array (re)definitions.
+
+\item [{\tt g\_link(+GVarName,+Term)}] ({\em inline predicate})~\\
+	Makes a link between {\tt GVarName} to the term {\tt Term}.
+	This allows the user to give a name to any Prolog term (in
+	particular non-ground terms).
+	Note that such an assignment is always undone when backtracking
+	occurs (since the term could no longer exists).
+	Note also that if {\tt Term} is an atom or an integer, {\tt g\_link}
+	and {\tt g\_assignb} have the same behavior.
+	Finally: {\tt g\_link} is not expansive at all neither for the
+	memory nor for the execution time point of views.
+	See below about array (re)definitions.
+
+\item [{\tt g\_read(+GVarName,?Term)}] ({\em inline predicate})~\\
+	Unifies {\tt Term} with the associated value of {\tt GVarName}.
+	See below about array readings.
+
+\item [{\tt g\_array\_size(+GVarName,?Size)}] ({\em inline predicate})~\\
+	Unifies {\tt Size} with the dimension (an integer $>0$) of the
+	array stored by {\tt GVarName}. Fails if {\tt GVarName} is not
+	an array.
+
+\end{description}
+
+
+The predicates {\tt g\_assign/2}, {\tt g\_assignb/2} and {\tt g\_link/2}
+define an array when {\tt Term} is a compound term with principal
+functor {\tt g\_array/1-2}. Then an array is assigned to {\tt GVarName}
+(backtrackable assignment or not depending on the predicate used).
+There are 3 forms for the term {\tt g\_array/1-2}:
+
+\begin{description}
+
+\item [{\tt g\_array(+Size)}]~\\
+	if {\tt Size} is an integer $>0$ then defines an array of {\tt Size}
+	elements which are all initialized with the
+	integer 0 w.r.t to the predicate used ({\tt g\_assign/2},
+	{\tt g\_assignb/2} or {\tt g\_link/2}).
+
+\item [{\tt g\_array(+Size,+Term)}]~\\
+	As above but the elements are initialized with the term
+	{\tt Term} instead of 0. Note that {\tt Term} can contain
+	other array definitions allowing thus for multi-dimensional
+	arrays. 
+
+\item [{\tt g\_array(+ListOfElements)}]~\\
+	As above if {\tt ListOfElements} is a list of length {\tt Size}
+	except that the elements of the array are initialized
+	w.r.t the elements of the list {\tt ListOfElements} (which can
+	contain other array definitions).
+
+\end{description}
+
+The compound term with principal functor {\tt g\_array\_extend/1-2} 
+can can be used similarly to {\tt g\_array/1-2} except that is does
+not initialize existing elements of the (possibly) previous array.\\
+
+When an array is read, a term of the form 
+{\tt g\_array([Elem$_0$,...,Elem$_{Size-1}$])} is returned.~\\
+
+
+Example: a simple counter:
+
+\begin{verbatim}
+
+| ?- [user].
+inc(Var,Value):- g_read(Var,Value), X is Value+1, g_assign(Var,X).
+^D
+yes
+
+| ?- inc(a,X).
+
+X = 0
+yes
+| ?- inc(a,X).
+
+X = 1
+yes
+
+\end{verbatim}
+
+
+
+Example: {\tt g\_assign} does not undo its assignment when backtracking
+occurs whereas {\tt g\_assignb} undoes it.
+
+
+\begin{verbatim}
+
+| ?-  g_assign(x,1), 
+      (   g_read(x,Old), g_assign(x,2) 
+      ;   g_read(x,Old), g_assign(x,3)
+      ).
+
+Old = 1 ? ;
+
+Old = 2       % the value 2 has not been undone
+yes
+
+| ?-  g_assign(x,1), 
+      (   g_read(x,Old), g_assignb(x,2) 
+      ;   g_read(x,Old), g_assignb(x,3)
+      ).
+
+Old = 1 ? ;
+
+Old = 1       % the value 2 has been undone
+yes
+
+\end{verbatim}
+
+
+Example: {\tt g\_assign} and {\tt g\_assignb} create a copy of the term
+whereas {\tt g\_link} does not. {\tt g\_link} can often avoid
+to pass big data structures (e.g. dictionnaries,...) as arguments of
+many predicates.
+
+
+
+\begin{verbatim}
+
+| ?- g_assign(foo,f(X)), X=12, g_read(foo,Y).
+
+X = 12
+Y = f(_60)
+yes
+
+| ?- g_link(foo,f(X)), X=12, g_read(foo,Y).
+
+X = 12
+Y = f(12)
+yes
+
+\end{verbatim}
+
+
+Example: array definitions.
+
+\begin{verbatim}
+
+| ?- g_assign(w,g_array(3)), g_read(w,X).
+
+X = g_array([0,0,0])
+
+| ?- g_assign(w(0),16), g_assign(w(1),32), g_assign(w(2),64), 
+     g_read(w,X).
+
+X = g_array([16,32,64])
+yes
+
+| ?- g_assign(k,g_array([16,32,64])), g_read(k,X).      % simpler
+
+X = g_array([16,32,64])
+yes
+
+| ?- g_assign(k,g_array(3,null)), g_read(k,X).
+
+X = g_array([null,null,null])
+yes
+
+\end{verbatim}
+
+
+
+Example: array extension.
+
+\begin{verbatim}
+
+| ?- g_assign(a,g_array([10,20,30])), g_read(a,X).
+
+X = g_array([10,20,30])
+yes
+| ?- g_assign(a,g_array_extend(5,null)), g_read(a,X).
+
+X = g_array([10,20,30,null,null])
+yes
+| ?- g_assign(a,g_array([10,20,30])), g_read(a,X).
+
+X = g_array([10,20,30])
+yes
+| ?- g_assign(a,g_array_extend([1,2,3,4,5,6])),  g_read(a,X).
+
+X = g_array([10,20,30,4,5,6])
+yes
+
+\end{verbatim}
+
+
+
+Example: 2-D array definition.
+
+
+\begin{verbatim}
+
+| ?- g_assign(w,g_array(2,g_array(3))), g_read(w,X).
+
+X = g_array([g_array([0,0,0]),g_array([0,0,0])])
+yes
+| ?- (   for(I,0,1), for(J,0,2), K is I*3+J, g_assign(w(I,J),K), 
+         fail
+     ;   g_read(w,X)
+     ).
+
+X = g_array([g_array([0,1,2]),g_array([3,4,5])])
+yes
+
+| ?- g_read(w(1),X).
+
+X = g_array([3,4,5])
+yes
+
+\end{verbatim}
+
+
+Example: hybrid array.
+
+
+\begin{verbatim}
+
+| ?- g_assign(w,g_array([1,2,g_array([a,b,c]),g_array(2,z),5])), 
+     g_read(w,X).
+
+X = g_array([1,2,g_array([a,b,c]),g_array([z,z]),5])
+yes
+| ?- g_read(w(1),X), g_read(w(2,1),Y), g_read(w(3,1),Z).
+
+X = 2
+Y = b
+Z = z
+
+yes
+| ?- g_read(w(1,2),X).
+
+Error: Illegal array index <2> for <w>
+
+
+\end{verbatim}
+
+
+
+
+
+
+\subsection{Miscellaneous}
+
+\begin{description}
+
+\item [{\tt pragma\_c(+Code)}] ({\em inline predicate})~\\
+	Inserts at compile-time the C code {\tt Code} in the resulting
+	C file. The use of this predicates requires a good knowledge
+	of the underlying Prolog engine\footnote{do not hesitate to
+	contact the author for more low-level information.}.
+
+\item [{\tt statistics}]~\\
+	Displays on the terminal statistics relating to memory usage
+	and run time.
+
+\item [{\tt statistics(?Key,?Value)}]~\\
+	This allows a program to gather various execution statistics.
+	For each of the possible keys {\tt Key}, {\tt Value} is
+	unified with a list of values, as follows:\\
+
+	\begin{center}
+	\begin{tabular}{|l|l|}
+	\hline
+	stack\_name & {\tt [Size\_used,Size\_free]} in bytes \\
+		    & stack\_name : {\tt local}, {\tt global}, {\tt trail} \\
+	\hline
+	runtime     & {\tt [Since\_start,Since\_last]} in ms \\
+	systime     & {\tt [Since\_start,Since\_last]} in ms \\
+	\hline
+	\end{tabular}
+	\end{center}
+
+
+\item [{\tt version}]~\\
+	Displays the introductory banner.
+
+\item [{\tt top\_level(+BannerBool,+CatchBool)}]~\\
+	invokes a (sub) top level. {\tt BannerBool} is {\tt true} or
+	{\tt false} and indicates if the introductory banner must be
+	displayed at the invocation. {\tt CatchBool} indicates if the
+	exceptions raised by {\tt throw/1} which are not captured must be
+	captured by top level (which simply write the {\tt Ball} sent
+	by {\tt throw/1} between curly brackets). 
+	If {\tt CatchBool} is false then the (sub) top level ends, the
+	exception is still raised and should be captured by an other
+	handler.
+	The global variable {\tt '\$top\_level'} counts the number of
+	nested top levels actually alive (can be used to test if a top
+	level is active).
+
+\item [{\tt gensym(?X)}]
+\item [{\tt gensym(+Prefix,+X)}]~\\
+	Generates an atom of the form {\tt Prefix{\em k}} where {\tt k}
+	is the current value of the global variable {\tt Prefix} (so
+	it must be an integer). This value is then incremented for the
+	next call to {\tt gensym}. if {\tt Prefix} is omitted then
+	{\tt '\$sym'} is used.
+
+
+\item [{\tt compiler\_name(?X)}]~\\
+	Unifies {\tt X} with the name of the compiler.
+
+\item [{\tt wam\_version(?X)}]~\\
+	Unifies {\tt X} with the current version.
+
+\item [{\tt wam\_year(?X)}]~\\
+	Unifies {\tt X} with the year of the current version.
+
+
+\item [{\tt argc(?X)}]~\\
+	Unifies {\tt X} with the number of Unix arguments (of the
+	command-line).
+
+\item [{\tt argv(+N,X)}]~\\
+	Unifies {\tt X} with the {\tt N}th Unix argument (starting at 0).
+	(see also {\tt Unix(argv(L))}).
+
+\item [{\tt Unix(+Term)}]~\\
+	Allows certain interactions with the operating system.  Under
+	Unix the possible forms of {\tt Term} are as follows:
+
+	\begin{description}
+
+	\item [{\tt access(+Path,+Mode)}]~\\
+		Tests if {\tt Mode} is the accessability of {\tt Path}
+		as in the C-function {\tt access(2)}.  
+
+	\item [{\tt argv(?Args)}]~\\
+		{\tt Args} is unified with a list of atoms of the
+		program arguments.
+
+	\item [{\tt cd}]~\\
+		Changes the current working directory to the home directory.
+
+	\item [{\tt cd(+Path)}]~\\
+		Changes the current working directory to {\tt Path}.
+
+	\item [{\tt exit(+Status)}]~\\
+		Terminates the Prolog process with the status {\tt Status}.
+		(Equivalent to {\tt halt/1}).
+
+	\item [{\tt getenv(+Name,?Value)}]~\\
+		Unifies {\tt Value} with the value of the environment
+		variable {\tt Name}.
+
+	\item [{\tt shell}]~\\
+		Starts a new interactive Unix shell named in the Unix
+		environment variable {\tt SHELL}.  The control is
+		returned to Prolog upon termination of the shell.  
+
+	\item [{\tt shell(+Command)}]~\\
+		Passes {\tt Command} to a new Unix shell named in the
+		Unix environment variable {\tt SHELL} for execution.  
+
+	\item [{\tt shell(+Command,?Status)}]~\\
+		Passes {\tt Command} to a new Unix shell named in the
+		Unix environment variable {\tt SHELL} for execution.
+		Unifies {\tt Status} with the returned status of 
+		{\tt Command}.   
+
+	\item [{\tt system(+Command)}]~\\
+		Passes {\tt Command} to a new Unix {\tt sh} process for
+		execution. 
+
+	\item [{\tt system(+Command,?Status)}]~\\
+		Passes {\tt Command} to a new Unix {\tt sh} process for
+		execution.  Unifies {\tt Status} with the returned
+		status of {\tt Command}. 
+
+	\end{description}
+
+
+\end{description}
+
+
+
+\section{Debugger}
+\label{debug}
+
+The debugger is based on the {\em procedure box} model as described in
+in Chapter eight of {\em Programming in Prolog} by W.F. Clocksin and
+C.S. Mellish (Springer-Verlag, 1981) which is recommended as an introduction.
+The proposed debug options are similar to those provided by SICStus or
+Quintus.
+The debugger can be used for interpreted code (i.e. dynamic
+predicates) or for compiled code (i.e. static predicates) compiled
+with the {\tt -dbg} option. The wam debugger is only available for
+static code compiled with the {\tt -dbg2} option.
+The basic built-in predicates to control the debugger are as follows
+
+\begin{description}
+
+\item [{\tt debug}]~\\
+	Switches the debugger on (showing spy-points).
+
+\item [{\tt nodebug}]~\\
+	Switches the debugger off.
+
+\item [{\tt debugging}]~\\
+	Prints onto the terminal information about the current
+	debugging state. 
+
+\item [{\tt trace}]~\\
+	Switches the debugger on (showing everything).
+
+\item [{\tt leash(+Mode)}]~\\
+	Leashing Mode is set to {\tt Mode}.  {\tt Mode} is a list
+	whose elements can be {\tt call}, {\tt exit}, {\tt fail} or {\tt
+	redo}.	
+
+\item [{\tt notrace}]~\\
+	Equivalent to {\tt nodebug/0}.
+
+\item [{\tt spy +Name/+Arity}]~\\
+	Sets a spy-point on the predicate whose principal functor is
+	{\tt Name} and arity is {\tt Arity}.
+
+\item [{\tt nospy +Name/+Arity}]~\\
+	Removes the spy-point from the predicate whose principal functor is
+	{\tt Name} and arity is {\tt Arity}.
+
+\item [{\tt nospyall}]~\\
+	Removes all spy-points that have been set.
+
+\end{description}
+
+During the debugging, the trace messages look like:\\
+
+{\tt~~~ S I J Port: Goal ?}\\
+
+where {\tt S} is a {\em spy-point indicator} and is {\tt +} if there is a
+spy-point on the predicate {\tt Goal} (or else {\tt S} is {\tt '~'}).
+{\tt N} is an {\em invocation number}. This unique number can
+be used to cross correlate the trace messages for the various ports,
+since it is unique for every invocation. {\tt M} is an {\tt indice
+number} which represents the number of direct {\em ancestors} this
+goal has. {\tt Port} specifies the particular port ({\tt call}, {\tt
+exit}, {\tt fail}, {\tt	redo}). {\tt Goal} is the current goal. The
+{\tt ?} indicates that you should type in one of the following debug
+commands\footnote{only the first character(s) of the commands are
+required, and {\tt < x >} denotes an optional element.}: \\
+
+\begin{description}
+
+\item [{\tt creep} or {\tt RET}]~\\
+	Single-steps to the very next port.
+
+\item [{\tt skip <n>}]~\\
+	Skips over the execution of predicates called by the current
+	goal. If you specify an invocation number (less or greater
+	than the current one) then the execution continues until the
+	the goal whose indice number is {\tt n} is reached.
+
+\item [{\tt leap}]~\\
+	Resumes running your program, only
+	stopping when a spy-point is reached.
+
+
+\item [{\tt abort}]~\\
+	Aborts the current execution.
+
+\item [{\tt goals} or {\tt goalsb}]~\\
+	Prints the list of ancestors to the current goal. {\tt goalsb}
+	also prints the remainding choice-points.
+
+\item [{\tt leash <l>...}]~\\
+	Sets the leashing mode to {\tt l$_1$ ... l$_k$} where each
+	{\tt l$_i$} is {\tt call}, {\tt exit}, {\tt fail} or {\tt redo}
+	(similar to {\tt leash/1}).
+
+\item [{\tt nobebug} or {\tt notrace}]~\\
+	Switches the debugger off. 
+
+\item [{\tt =}]~\\
+	Prints onto the terminal information about the current
+	debugging state (similar to {\tt debugging/0}).
+
+
+\item [{\tt + <pred/arity>}]~\\
+	Sets a spy-point on the current goal or on the goal whose
+	principal functor is {\tt pred} and arity {\tt arity} (similar
+	to {\tt spy/1}).
+
+\item [{\tt - <pred/arity>}]~\\
+	Removes the spy-point from the current goal or from the goal whose
+	principal functor is {\tt pred} and arity {\tt arity} (similar
+	to {\tt nospy/1}).
+
+\item [{\tt < <n>}]~\\
+	Sets the {\em printdepth} limit to {\tt n} or resets it to
+	{\tt 10} if {\tt n} is not specified.
+
+\item [{\tt exact}]~\\
+	In this mode all failures are traced.
+
+\item [{\tt noexact}]~\\
+	In this mode failures occuring when unifying the head are not
+	traced (like in SICStus/Quitus).
+
+\item [{\tt help}]~\\
+	Displays a summarize of the options displayed above.
+
+\end{description}
+
+There are also some low-level (i.e. WAM level) commands (only
+available for static code compiled with the {\tt -dbg2} option):
+
+\begin{description}
+
+\item [{\tt write adr <n>}]~\\
+	Uses {\tt write/1} to print {\tt n} Prolog terms starting at
+	{\tt adr}.
+
+\item [{\tt data adr <n>}]~\\
+	Displays (dump) {\tt n} words starting at {\tt adr}.
+
+\item [{\tt modify adr <n>}]~\\
+	Displays (dump) and makes it possible to modify {\tt n} words
+	starting at {\tt adr}.
+
+\item [{\tt where sadr}]~\\
+	Displays the real address corresponding to {\tt sadr}.
+
+\item [{\tt deref adr}]~\\
+	Displays the dereferenced word located at {\tt adr}.
+
+\item [{\tt envir <sadr>}]~\\
+	Diplays the current environment or the one located at {\tt sadr}.
+
+\item [{\tt backtrack <sadr>}]~\\
+	Diplays the current choice point or the one located at {\tt sadr}.
+
+\end{description}
+
+An address ({\tt adr}) has the following syntax: {\tt bank\_name < [n]
+>}. A stack address has the following syntax: {\tt stack\_name < [n] >}.
+{\tt bank\_name} can be one of the following name and {\tt n} is an
+optional offset specifier (integer):\\
+
+\begin{center}
+\begin{tabular}{|lll|}
+\hline
+{\tt bank\_name ::=} & {\tt reg}	 & WAM general registers 	\\
+		     & {\tt x}		 & WAM temporaries 		\\
+		     & {\tt y}		 & current permanent variables 	\\
+		     & {\tt stack\_name} & a stack			\\
+		     &			 &				\\
+{\tt stack\_name::=} & {\tt local}	 & local stack 			\\
+		     & {\tt global}	 & global stack 		\\
+		     & {\tt trail}	 & trail stack   		\\
+\hline
+\end{tabular}
+\end{center}
+
+
+
+
+\end{document}
+

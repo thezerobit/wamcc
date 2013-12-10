@@ -1,0 +1,381 @@
+/****************************************************************************
+Prolog to Wam Compiler                     INRIA Rocquencourt - ChLoE Project
+Version 2.1                                                Daniel Diaz - 1994
+
+file : const.usr
+****************************************************************************/
+#include <string.h>
+long strtol();
+
+
+/*---------------------------------*/
+/* Constants                       */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Type Definitions                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Global Variables                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Function Prototypes             */
+/*---------------------------------*/
+
+static
+int      Atom_Concat_Det_3      (void);
+
+static
+AtomInf *Number_To_Atom         (int x);
+
+static
+Bool     Atom_To_Number         (char *name,int *x);
+
+static
+Bool     Atom_To_Codes          (char *name);
+
+static
+AtomInf *Codes_To_Atom_To_Number(WamWord lst_word);
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* atom_length(A,L): returns the length of an atom               */
+          /*                                                               */
+          /* A(0) must be bound to an atom                                 */
+          /* A(1) will be unified with an INT                              */
+          /*---------------------------------------------------------------*/
+
+#define Atom_Length_2                                                       \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag==CST)                                                          \
+         get_integer(UnTag_CST(word)->length,1)                             \
+      else                                                                  \
+         fail
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* atom_concat_det(A1,A2,A3,Code): A3=A1+A3 if deterministic     */
+          /*                                                               */
+          /* A(0) must be bound to either a var or an atom                 */
+          /* A(1) must be bound to either a var or an atom                 */
+          /* A(2) must be bound to either a var or an atom                 */
+          /* A(3) will be unified with an INT                              */
+          /* Code will be 0 if error, 1 if ok (deterministic) 2 if not det.*/
+          /* det. iff atom(A1)&atom(A2)|atom(A1)&atom(A3)|atom(A2)&atom(A3)*/
+          /*---------------------------------------------------------------*/
+
+#define Atom_Concat_Det_4                                                   \
+    {                                                                       \
+     int code=Atom_Concat_Det_3();                                          \
+                                                                            \
+     get_integer(code,3)                                                    \
+    }
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* char_code(Char,Code): ensures ascii code(Char)=Code           */
+          /*                                                               */
+          /* A(0) will be unified with an atom                             */
+          /* A(1) will be unified with an INT                              */
+          /*---------------------------------------------------------------*/
+
+#define Char_Code_2                                                         \
+    {                                                                       \
+     char str[2];                                                           \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag==CST)                                                          \
+         get_integer(UnTag_CST(word)->name[0],1)                            \
+      else                                                                  \
+        {                                                                   \
+         Deref(A(1),word,tag,adr)                                           \
+         if (tag==INT)                                                      \
+            {                                                               \
+             str[0]=UnTag_INT(word);                                        \
+             str[1]='\0';                                                   \
+             get_constant(Create_Allocate_Atom(str),0)                      \
+            }                                                               \
+           else                                                             \
+             fail                                                           \
+        }                                                                   \
+    }
+
+
+
+          /*---------------------------------------------------------------*/
+          /* number_atom(N,A): ensures A is the atom associated to N       */
+          /*                                                               */
+          /* A(0) will be unified with an INT                              */
+          /* A(1) will be unified with an atom                             */
+          /*---------------------------------------------------------------*/
+
+#define Number_Atom_2                                                       \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag==INT)                                                          \
+         get_constant(Number_To_Atom(UnTag_INT(word)),1)                    \
+      else                                                                  \
+        {                                                                   \
+         Deref(A(1),word,tag,adr)                                           \
+         if (tag==CST && Atom_To_Number(UnTag_CST(word)->name,&word))       \
+             get_integer(word,0)                                            \
+           else                                                             \
+             fail                                                           \
+        }
+
+
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* atom_codes(A,L): ensures L is the string associated to A      */
+          /*                                                               */
+          /* A(0) will be unified with an atom                             */
+          /* A(1) will be unified with a string                            */
+          /*---------------------------------------------------------------*/
+
+#define Atom_Codes_2                                                        \
+    {                                                                       \
+     AtomInf *atom;                                                         \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag==CST)                                                          \
+        {                                                                   \
+         if (!Atom_To_Codes(UnTag_CST(word)->name))                         \
+             fail                                                           \
+        }                                                                   \
+      else                                                                  \
+        {                                                                   \
+         if (atom=Codes_To_Atom(A(1)))                                      \
+             get_constant(atom,0)                                           \
+           else                                                             \
+             fail                                                           \
+        }                                                                   \
+    }
+
+         
+
+
+
+/* Above this line, put your first macros (these included by pragma_c) */
+
+#undef  fail
+#define fail Fail_Like_Bool
+
+/* Below this line, put your others macros and your functions */
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* ATOM_CONCAT_DET_3                                                       */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static int Atom_Concat_Det_3(void)
+
+{
+ Decl_Wam_Engine_Vars
+ WamWord  word1,tag1,*adr1;
+ AtomInf *atom1;
+ WamWord  word2,tag2,*adr2;
+ AtomInf *atom2;
+ WamWord  word3,tag3,*adr3;
+ AtomInf *atom3;
+ char     str[256];
+ char     c,*p,*q;
+
+ Deref(A(0),word1,tag1,adr1)
+ Deref(A(1),word2,tag2,adr2)
+
+ if (tag1==CST)
+    {
+     atom1=UnTag_CST(word1);
+     if (tag2==CST)
+        {                                                     /* A1 and A2 */
+         atom2=UnTag_CST(word2);
+         p=str;
+         q=atom1->name;
+         while(*p++=*q++)
+             ;
+
+         p--;
+         q=atom2->name;
+         while(*p++=*q++)
+             ;
+
+         atom3=Create_Allocate_Atom(str);
+         get_constant(atom3,2);
+         return TRUE;
+        }
+
+     Deref(A(2),word3,tag3,adr3)
+     if (tag3!=CST)
+         return FALSE;
+
+     atom3=UnTag_CST(word3);
+                                                              /* A1 and A3 */
+     if (atom1->length > atom3->length ||
+         Lib3(strncmp,atom3->name,atom1->name,atom1->length)!=0)
+         return FALSE;
+
+     p=atom3->name+atom1->length;
+     atom2=Create_Allocate_Atom(p);
+     get_constant(atom2,1);
+     return TRUE;
+    }
+
+ if (tag2==CST)
+    {
+     atom2=UnTag_CST(word2);
+
+     Deref(A(2),word3,tag3,adr3)
+     if (tag3!=CST)
+         return FALSE;
+
+     atom3=UnTag_CST(word3);
+                                                              /* A2 and A3 */
+     p=atom3->name + atom3->length - atom2->length;
+
+     if (atom2->length > atom3->length || Lib2(strcmp,p,atom2->name)!=0)
+         return FALSE;
+
+     c= *p;
+     *p='\0';
+     atom1=Create_Allocate_Atom(atom3->name);
+     *p=c;
+     get_constant(atom1,0);
+     return TRUE;
+    }
+
+ return 2;
+
+lab_fail:
+ return FALSE;
+}       
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* NUMBER_TO_ATOM                                                          */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static AtomInf *Number_To_Atom(int x)
+
+{
+ char str[80];
+
+ Lib3(sprintf,str,"%d",x);
+
+ return Create_Allocate_Atom(str);
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* ATOM_TO_NUMBER                                                          */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool Atom_To_Number(char *name,int *x)
+
+{
+ char *p;
+
+ *x=Lib3(strtol,name,&p,10);
+
+ return (*p=='\0');
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* ATOM_TO_CODES                                                           */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static Bool Atom_To_Codes(char *name)
+
+{
+ Decl_Wam_Engine_Vars
+
+ for(;*name;name++)
+    {
+     get_list(1)
+     unify_integer(*name)
+     unify_x_variable(1)
+    }
+
+ get_nil(1)
+ return TRUE;
+
+lab_fail:
+ return FALSE;
+}
+
+
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* CODES_TO_ATOM                                                           */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static AtomInf *Codes_To_Atom(WamWord lst_word)
+
+{
+ WamWord  word,tag,*adr;
+ WamWord  cur_word;
+ char     str[256];
+ char    *p=str;
+
+ for(;;)
+    {
+     Deref(lst_word,word,tag,adr)
+     if (word==word_nil)
+         break;
+
+     if (tag!=LST)
+         return NULL;
+
+     adr=UnTag_LST(word);
+     cur_word=Car(adr);
+     lst_word=Cdr(adr);
+
+     Deref(cur_word,word,tag,adr)
+     if (tag!=INT)
+         return NULL;
+
+     *p++ = UnTag_INT(word);
+    }
+
+ *p='\0';
+
+ return Create_Allocate_Atom(str);
+}
+
+
+
+
+/*-------------------------------------------------------------------------*/
+/* INITIALIZE_USR                                                          */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Initialize_Usr(void)
+
+{
+}
+
+/* end of user file */
+
+#undef  fail
+#define fail Fail_Like_Wam

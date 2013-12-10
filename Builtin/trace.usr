@@ -1,0 +1,155 @@
+/****************************************************************************
+Prolog to Wam Compiler                     INRIA Rocquencourt - ChLoE Project
+Version 2.1                                                Daniel Diaz - 1994
+
+file : trace.usr
+****************************************************************************/
+
+#include "debugger.h"
+
+/*---------------------------------*/
+/* Constants                       */
+/*---------------------------------*/
+
+#define ERR_ILLEGAL_ARGUMENT       "\nError: Illegal argument\n"
+
+/*---------------------------------*/
+/* Type Definitions                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Global Variables                */
+/*---------------------------------*/
+
+/*---------------------------------*/
+/* Function Prototypes             */
+/*---------------------------------*/
+
+
+          /*---------------------------------------------------------------*/
+          /* debug_mode(X): gets/puts debugger mode                        */
+          /*                                                               */
+          /* A(0) must be a variable or a CST debug/trace/nodebug          */
+          /*---------------------------------------------------------------*/
+
+#define Debug_Mode_1                                                        \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag==REF)                                                          \
+         get_constant(Debug_Get_Mode(),0)                                   \
+      else                                                                  \
+        {                                                                   \
+         if (tag!=CST || !Debug_Set_Mode(UnTag_CST(word)))                  \
+            {                                                               \
+             Lib1(printf,ERR_ILLEGAL_ARGUMENT);                             \
+             fail                                                           \
+            }                                                               \
+        }
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* leash2(X): adds a leashing mode                               */
+          /*                                                               */
+          /* A(0) must be bound to a CST call/exit/fail/redo               */
+          /*---------------------------------------------------------------*/
+
+#define Leash2_1                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag!=CST || !Debug_Add_Leash_Mode(UnTag_CST(word)))                \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* spy1(F,N): places a spypoint on F/N                           */
+          /*                                                               */
+          /* A(0) must be bound to a CST                                   */
+          /* A(1) must be bound to an INT                                  */
+          /*---------------------------------------------------------------*/
+
+#define Spy1_2                                                              \
+    {                                                                       \
+     AtomInf *functor;                                                      \
+     int      arity;                                                        \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag!=CST)                                                          \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }                                                                   \
+     functor=UnTag_CST(word);                                               \
+     Deref(A(1),word,tag,adr)                                               \
+     if (tag!=INT)                                                          \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }                                                                   \
+     arity=UnTag_INT(word);                                                 \
+     Debug_Add_Spy_Point(functor,arity);                                    \
+    }
+
+
+
+
+          /*---------------------------------------------------------------*/
+          /* nospy1(F,N): removes a spypoint from F/N                      */
+          /*                                                               */
+          /* A(0) must be bound to a CST                                   */
+          /* A(1) must be bound to an INT                                  */
+          /*---------------------------------------------------------------*/
+
+#define Nospy1_2                                                            \
+    {                                                                       \
+     AtomInf *functor;                                                      \
+     int      arity;                                                        \
+                                                                            \
+     Deref(A(0),word,tag,adr)                                               \
+     if (tag!=CST)                                                          \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }                                                                   \
+     functor=UnTag_CST(word);                                               \
+     Deref(A(1),word,tag,adr)                                               \
+     if (tag!=INT)                                                          \
+        {                                                                   \
+         Lib1(printf,ERR_ILLEGAL_ARGUMENT);                                 \
+         fail                                                               \
+        }                                                                   \
+     arity=UnTag_INT(word);                                                 \
+     Debug_Remove_Spy_Point(functor,arity);                                 \
+    }
+
+
+
+
+
+
+/* Above this line, put your first macros (these included by pragma_c) */
+
+#undef  fail
+#define fail Fail_Like_Bool
+
+/* Below this line, put your others macros and your functions */
+
+
+/*-------------------------------------------------------------------------*/
+/* INITIALIZE_USR                                                          */
+/*                                                                         */
+/*-------------------------------------------------------------------------*/
+static void Initialize_Usr(void)
+
+{
+ Init_Debugger();
+}
+
+/* end of user file */
+
+#undef  fail
+#define fail Fail_Like_Wam
